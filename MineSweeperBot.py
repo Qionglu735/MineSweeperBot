@@ -40,11 +40,11 @@ class Land(QtWidgets.QPushButton):
         self.setToolTip(str(x + MAP_X * y) + "(" + str(x) + ", " + str(y) + ")")
         
         self.setCheckable(True)
-        # self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         
-        self.x, self.y= x, y
-        self.cover, self.content= SYMBOL_BLANK, SYMBOL_BLANK
-        self.haveMine = False
+        self.x, self.y = x, y
+        self.cover, self.content = SYMBOL_BLANK, SYMBOL_BLANK
+        self.have_mine = False
         self.mine_num = 0
     
     def left_click(self):
@@ -61,49 +61,49 @@ class Land(QtWidgets.QPushButton):
             self.parent().check_end_game(self.x, self.y)
             if not GAME_TERMINATED and self.content == " ":
                 x, y = self.x, self.y
-                tmpX, tmpY = [], []
-                #NW
+                tmp_x, tmp_y = [], []
+                # NW
                 if x - 1 >= 0 and y - 1 >= 0 and not MAP[(x - 1) + MAP_X * (y - 1)].isChecked():
                     MAP[(x - 1) + MAP_X * (y - 1)].setChecked(True)
-                    tmpX.append(x - 1)
-                    tmpY.append(y - 1)
-                #W
+                    tmp_x.append(x - 1)
+                    tmp_y.append(y - 1)
+                # W
                 if x - 1 >= 0 and not MAP[(x - 1) + MAP_X * y].isChecked():
                     MAP[(x - 1) + MAP_X * y].setChecked(True)
-                    tmpX.append(x - 1)
-                    tmpY.append(y)
-                #SW
+                    tmp_x.append(x - 1)
+                    tmp_y.append(y)
+                # SW
                 if x - 1 >= 0 and y + 1 <MAP_Y and not MAP[(x - 1) + MAP_X * (y + 1)].isChecked():
                     MAP[(x - 1) + MAP_X * (y + 1)].setChecked(True)
-                    tmpX.append(x - 1)
-                    tmpY.append(y + 1)
-                #N
+                    tmp_x.append(x - 1)
+                    tmp_y.append(y + 1)
+                # N
                 if y - 1 >= 0 and not MAP[x + MAP_X * (y - 1)].isChecked():
                     MAP[x + MAP_X * (y - 1)].setChecked(True)
-                    tmpX.append(x)
-                    tmpY.append(y - 1)
-                #S
+                    tmp_x.append(x)
+                    tmp_y.append(y - 1)
+                # S
                 if y + 1 < MAP_Y and not MAP[x + MAP_X * (y + 1)].isChecked():
                     MAP[x + MAP_X * (y + 1)].setChecked(True)
-                    tmpX.append(x)
-                    tmpY.append(y + 1)
-                #NE
+                    tmp_x.append(x)
+                    tmp_y.append(y + 1)
+                # NE
                 if x + 1 < MAP_X and y - 1 >= 0 and not MAP[(x + 1) + MAP_X * (y -1)].isChecked():
                     MAP[(x + 1) + MAP_X * (y -1)].setChecked(True)
-                    tmpX.append(x + 1)
-                    tmpY.append(y - 1)
-                #E
+                    tmp_x.append(x + 1)
+                    tmp_y.append(y - 1)
+                # E
                 if x + 1 < MAP_X and not MAP[(x + 1) + MAP_X * y].isChecked():
                     MAP[(x + 1) + MAP_X * y].setChecked(True)
-                    tmpX.append(x + 1)
-                    tmpY.append(y)
-                #SE
+                    tmp_x.append(x + 1)
+                    tmp_y.append(y)
+                # SE
                 if x + 1 < MAP_X and y + 1 < MAP_Y and not MAP[(x + 1) + MAP_X * (y + 1)].isChecked():
                     MAP[(x + 1) + MAP_X * (y + 1)].setChecked(True)
-                    tmpX.append(x + 1)
-                    tmpY.append(y + 1)
-                for i in range(len(tmpX)):
-                    MAP[tmpX[i] + MAP_X * tmpY[i]].left_click()
+                    tmp_x.append(x + 1)
+                    tmp_y.append(y + 1)
+                for i in range(len(tmp_x)):
+                    MAP[tmp_x[i] + MAP_X * tmp_y[i]].left_click()
         else:
             self.setChecked(True)
             x, y = self.x, self.y
@@ -195,7 +195,7 @@ class Land(QtWidgets.QPushButton):
             self.right_click()
     
     def reveal(self, flag):
-        if self.haveMine:
+        if self.have_mine:
             if flag:
                 self.setToolTip("!" + str(self.x + MAP_X * self.y) + "(" + str(self.x) + ", " + str(self.y) + ")")
             else:
@@ -213,17 +213,18 @@ class MineField(QtWidgets.QWidget):
         
         for y in range(MAP_Y):
             for x in range(MAP_X):
-                tmpLand = Land(x, y)
-                tmpLand.clicked.connect(self.left_click)
-                tmpLand.customContextMenuRequested.connect(self.right_click)
-                MAP.append(tmpLand)
-                grid.addWidget(tmpLand, y, x)
+                tmp_land = Land(x, y)
+                tmp_land.clicked.connect(self.left_click)
+                tmp_land.customContextMenuRequested.connect(self.right_click)
+                MAP.append(tmp_land)
+                grid.addWidget(tmp_land, y, x)
         
         self.generate_map()
         
         self.setLayout(grid)
-        
-    def generate_map(self):
+
+    @staticmethod
+    def generate_map():
         global REVEALED_COUNT
         global MARKED_COUNT
         global GAME_TERMINATED
@@ -231,7 +232,7 @@ class MineField(QtWidgets.QWidget):
         
         for x in range(MAP_X):
             for y in range(MAP_Y):
-                MAP[x + MAP_X * y].haveMine = False
+                MAP[x + MAP_X * y].have_mine = False
                 MAP[x + MAP_X * y].setChecked(False)
                 MAP[x + MAP_X * y].cover = SYMBOL_BLANK
                 MAP[x + MAP_X * y].content = SYMBOL_BLANK
@@ -240,40 +241,40 @@ class MineField(QtWidgets.QWidget):
         for i in range(MAP_Z):
             x = randint(0, MAP_X-1)
             y = randint(0, MAP_Y-1)
-            while MAP[x + MAP_X * y].haveMine:
+            while MAP[x + MAP_X * y].have_mine:
                 x = randint(0, MAP_X-1)
                 y = randint(0, MAP_Y-1)
-            MAP[x + MAP_X * y].haveMine = True
+            MAP[x + MAP_X * y].have_mine = True
         
         for x in range(MAP_X):
             for y in range(MAP_Y):
-                if MAP[x + MAP_X * y].haveMine:
+                if MAP[x + MAP_X * y].have_mine:
                     MAP[x + MAP_X * y].content = SYMBOL_MINE
                 else:
                     mine_num = 0
                     # NW
-                    if x - 1 >= 0 and y - 1 >= 0 and MAP[(x - 1) + MAP_X * (y - 1)].haveMine:
+                    if x - 1 >= 0 and y - 1 >= 0 and MAP[(x - 1) + MAP_X * (y - 1)].have_mine:
                         mine_num += 1
                     # W
-                    if x - 1 >= 0 and MAP[(x - 1) + MAP_X * y].haveMine:
+                    if x - 1 >= 0 and MAP[(x - 1) + MAP_X * y].have_mine:
                         mine_num += 1
                     # SW
-                    if x - 1 >= 0 and y + 1 <MAP_Y and MAP[(x - 1) + MAP_X * (y + 1)].haveMine:
+                    if x - 1 >= 0 and y + 1 <MAP_Y and MAP[(x - 1) + MAP_X * (y + 1)].have_mine:
                         mine_num += 1
                     # N
-                    if y - 1 >= 0 and MAP[x + MAP_X * (y - 1)].haveMine:
+                    if y - 1 >= 0 and MAP[x + MAP_X * (y - 1)].have_mine:
                         mine_num += 1
                     # S
-                    if y + 1 < MAP_Y and MAP[x + MAP_X * (y + 1)].haveMine:
+                    if y + 1 < MAP_Y and MAP[x + MAP_X * (y + 1)].have_mine:
                         mine_num += 1
                     # NE
-                    if x + 1 < MAP_X and y - 1 >= 0 and MAP[(x + 1) + MAP_X * (y -1)].haveMine:
+                    if x + 1 < MAP_X and y - 1 >= 0 and MAP[(x + 1) + MAP_X * (y -1)].have_mine:
                         mine_num += 1
                     # E
-                    if x + 1 < MAP_X and MAP[(x + 1) + MAP_X * y].haveMine:
+                    if x + 1 < MAP_X and MAP[(x + 1) + MAP_X * y].have_mine:
                         mine_num += 1
                     # SE
-                    if x + 1 < MAP_X and y + 1 < MAP_Y and MAP[(x + 1) + MAP_X * (y + 1)].haveMine:
+                    if x + 1 < MAP_X and y + 1 < MAP_Y and MAP[(x + 1) + MAP_X * (y + 1)].have_mine:
                         mine_num += 1
                     if mine_num == 0:
                         MAP[x + MAP_X * y].mine_num = mine_num
@@ -285,11 +286,11 @@ class MineField(QtWidgets.QWidget):
     def check_end_game(self, x, y):
         global GAME_TERMINATED
         global REVEALED_COUNT
-        if MAP[x + MAP_X * y].haveMine:
+        if MAP[x + MAP_X * y].have_mine:
             GAME_TERMINATED = True
             self.parent().show_message("YOU FAILED")
             for i in MAP:
-                    if i.haveMine:
+                    if i.have_mine:
                         i.cover = SYMBOL_MINE
                         self.button_set_text(i, SYMBOL_MINE)
         elif REVEALED_COUNT == MAP_X * MAP_Y - MAP_Z:
@@ -297,7 +298,7 @@ class MineField(QtWidgets.QWidget):
             self.parent().show_message("YOU WIN")
             for x in range(MAP_X):
                 for y in range(MAP_Y):
-                    if MAP[x + MAP_X * y].haveMine:
+                    if MAP[x + MAP_X * y].have_mine:
                         MAP[x + MAP_X * y].cover = SYMBOL_FLAG
                         self.button_set_text(MAP[x + MAP_X * y], SYMBOL_FLAG)
 
@@ -327,7 +328,7 @@ class UI(QtWidgets.QMainWindow):
         
         self.setCentralWidget(self.mine_field)
         self.adjustSize()
-        # self.setWindowFlags(QtCore.Qt.WindowMinimizeButtonHint)
+        # self.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint)
         self.move(300, 150)
         icon = QtGui.QIcon()
         icon.addPixmap(QtGui.QPixmap("Mine.ico"))
