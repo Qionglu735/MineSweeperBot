@@ -1,11 +1,12 @@
-import datetime
-from random import randint
-import sys
-from PyQt4 import QtGui, QtCore
 
-MAP_X = 16  #   NW N NE
-MAP_Y = 16  #     W O E
-MAP_Z = 40  #   SW S SE
+from random import randint
+from PySide6 import QtGui, QtCore, QtWidgets
+import datetime
+import sys
+
+MAP_X = 16  # NW N NE
+MAP_Y = 16  # W  O  E
+MAP_Z = 40  # SW S SE
 MAP = []
 
 REVEALED_COUNT = 0
@@ -27,23 +28,26 @@ BUTTON_SIZE = 20
 
 ui = None
 
-class land(QtGui.QPushButton):
+
+class Land(QtWidgets.QPushButton):
     def __init__(self, x, y):
-        QtGui.QPushButton.__init__(self, SYMBOL_BLANK)
+        QtWidgets.QPushButton.__init__(self, SYMBOL_BLANK)
         
         self.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
-        self.setFont(QtGui.QFont("Roman Times", 10, QtGui.QFont.Bold))
+        q_font = QtGui.QFont("Roman Times", 10)
+        q_font.setBold(True)
+        self.setFont(q_font)
         self.setToolTip(str(x + MAP_X * y) + "(" + str(x) + ", " + str(y) + ")")
         
         self.setCheckable(True)
-        self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        # self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         
         self.x, self.y= x, y
         self.cover, self.content= SYMBOL_BLANK, SYMBOL_BLANK
         self.haveMine = False
-        self.mineNum = 0
+        self.mine_num = 0
     
-    def leftClick(self):
+    def left_click(self):
         global GAME_TERMINATED
         if GAME_TERMINATED or (not GAME_TERMINATED and self.cover != SYMBOL_BLANK):
             if self.isChecked():
@@ -51,10 +55,10 @@ class land(QtGui.QPushButton):
             else:
                 self.setChecked(True)
         elif self.isChecked():
-            self.parent().buttonSetText(self, self.content)
+            self.parent().button_set_text(self, self.content)
             global REVEALED_COUNT
             REVEALED_COUNT += 1
-            self.parent().checkEndGame(self.x, self.y)
+            self.parent().check_end_game(self.x, self.y)
             if not GAME_TERMINATED and self.content == " ":
                 x, y = self.x, self.y
                 tmpX, tmpY = [], []
@@ -99,69 +103,69 @@ class land(QtGui.QPushButton):
                     tmpX.append(x + 1)
                     tmpY.append(y + 1)
                 for i in range(len(tmpX)):
-                    MAP[tmpX[i] + MAP_X * tmpY[i]].leftClick()
+                    MAP[tmpX[i] + MAP_X * tmpY[i]].left_click()
         else:
             self.setChecked(True)
             x, y = self.x, self.y
-            flagNum = 0
-            #NW
+            flag_num = 0
+            # NW
             if x - 1 >= 0 and y - 1 >= 0 and not MAP[(x - 1) + MAP_X * (y - 1)].isChecked() and MAP[(x - 1) + MAP_X * (y - 1)].cover == SYMBOL_FLAG:
-                flagNum += 1
-            #W
+                flag_num += 1
+            # W
             if x - 1 >= 0 and not MAP[(x - 1) + MAP_X * y].isChecked() and MAP[(x - 1) + MAP_X * y].cover == SYMBOL_FLAG:
-                flagNum += 1
-            #SW
+                flag_num += 1
+            # SW
             if x - 1 >= 0 and y + 1 <MAP_Y and not MAP[(x - 1) + MAP_X * (y + 1)].isChecked() and MAP[(x - 1) + MAP_X * (y + 1)].cover == SYMBOL_FLAG:
-                flagNum += 1
-            #N
+                flag_num += 1
+            # N
             if y - 1 >= 0 and not MAP[x + MAP_X * (y - 1)].isChecked() and MAP[x + MAP_X * (y - 1)].cover == SYMBOL_FLAG:
-                flagNum += 1
-            #S
+                flag_num += 1
+            # S
             if y + 1 < MAP_Y and not MAP[x + MAP_X * (y + 1)].isChecked() and MAP[x + MAP_X * (y + 1)].cover == SYMBOL_FLAG:
-                flagNum += 1
-            #NE
+                flag_num += 1
+            # NE
             if x + 1 < MAP_X and y - 1 >= 0 and not MAP[(x + 1) + MAP_X * (y - 1)].isChecked() and MAP[(x + 1) + MAP_X * (y -1)].cover == SYMBOL_FLAG:
-                flagNum += 1
-            #E
+                flag_num += 1
+            # E
             if x + 1 < MAP_X and not MAP[(x + 1) + MAP_X * y].isChecked() and MAP[(x + 1) + MAP_X * y].cover == SYMBOL_FLAG:
-                flagNum += 1
-            #SE
+                flag_num += 1
+            # SE
             if x + 1 < MAP_X and y + 1 < MAP_Y and not MAP[(x + 1) + MAP_X * (y + 1)].isChecked() and MAP[(x + 1) + MAP_X * (y + 1)].cover == SYMBOL_FLAG:
-                flagNum += 1
-            if flagNum == MAP[x + MAP_X * y].mineNum:
-                #NW
+                flag_num += 1
+            if flag_num == MAP[x + MAP_X * y].mine_num:
+                # NW
                 if x - 1 >= 0 and y - 1 >= 0 and not MAP[(x - 1) + MAP_X * (y - 1)].isChecked() and MAP[(x - 1) + MAP_X * (y - 1)].cover != SYMBOL_FLAG:
-                    MAP[(x - 1) + MAP_X * (y - 1)].autoLeftClick()
-                #W
+                    MAP[(x - 1) + MAP_X * (y - 1)].auto_left_click()
+                # W
                 if x - 1 >= 0 and not MAP[(x - 1) + MAP_X * y].isChecked() and MAP[(x - 1) + MAP_X * y].cover != SYMBOL_FLAG:
-                    MAP[(x - 1) + MAP_X * y].autoLeftClick()
-                #SW
+                    MAP[(x - 1) + MAP_X * y].auto_left_click()
+                # SW
                 if x - 1 >= 0 and y + 1 <MAP_Y and not MAP[(x - 1) + MAP_X * (y + 1)].isChecked() and MAP[(x - 1) + MAP_X * (y + 1)].cover != SYMBOL_FLAG:
-                    MAP[(x - 1) + MAP_X * (y + 1)].autoLeftClick()
-                #N
+                    MAP[(x - 1) + MAP_X * (y + 1)].auto_left_click()
+                # N
                 if y - 1 >= 0 and not MAP[x + MAP_X * (y - 1)].isChecked() and MAP[x + MAP_X * (y - 1)].cover != SYMBOL_FLAG:
-                    MAP[x + MAP_X * (y - 1)].autoLeftClick()
-                #S
+                    MAP[x + MAP_X * (y - 1)].auto_left_click()
+                # S
                 if y + 1 < MAP_Y and not MAP[x + MAP_X * (y + 1)].isChecked() and MAP[x + MAP_X * (y + 1)].cover != SYMBOL_FLAG:
-                    MAP[x + MAP_X * (y + 1)].autoLeftClick()
-                #NE
+                    MAP[x + MAP_X * (y + 1)].auto_left_click()
+                # NE
                 if x + 1 < MAP_X and y - 1 >= 0 and not MAP[(x + 1) + MAP_X * (y - 1)].isChecked() and MAP[(x + 1) + MAP_X * (y -1)].cover != SYMBOL_FLAG:
-                    MAP[(x + 1) + MAP_X * (y - 1)].autoLeftClick()
-                #E
+                    MAP[(x + 1) + MAP_X * (y - 1)].auto_left_click()
+                # E
                 if x + 1 < MAP_X and not MAP[(x + 1) + MAP_X * y].isChecked() and MAP[(x + 1) + MAP_X * y].cover != SYMBOL_FLAG:
-                    MAP[(x + 1) + MAP_X * y].autoLeftClick()
-                #SE
+                    MAP[(x + 1) + MAP_X * y].auto_left_click()
+                # SE
                 if x + 1 < MAP_X and y + 1 < MAP_Y and not MAP[(x + 1) + MAP_X * (y + 1)].isChecked() and MAP[(x + 1) + MAP_X * (y + 1)].cover != SYMBOL_FLAG:
-                    MAP[(x + 1) + MAP_X * (y + 1)].autoLeftClick()
+                    MAP[(x + 1) + MAP_X * (y + 1)].auto_left_click()
         if not GAME_TERMINATED:
-            self.parent().parent().showMessage(str(MAP_Z - MARKED_COUNT) + " mines remianed")
+            self.parent().parent().show_message(str(MAP_Z - MARKED_COUNT) + " mines remained")
     
-    def autoLeftClick(self):
-        print "Auto Left Click (" + str(self.x) + ", " + str(self.y) + ")"
+    def auto_left_click(self):
+        print("Auto Left Click (" + str(self.x) + ", " + str(self.y) + ")")
         self.setChecked(True)
-        self.leftClick()
+        self.left_click()
     
-    def rightClick(self):
+    def right_click(self):
         global GAME_TERMINATED
         global MARKED_COUNT
         global TRICK_MODE
@@ -177,18 +181,18 @@ class land(QtGui.QPushButton):
                     MARKED_COUNT -= 1
                 elif self.cover == SYMBOL_UNKNOWN:
                     self.cover = SYMBOL_BLANK
-                self.parent().buttonSetText(self, self.cover)
+                self.parent().button_set_text(self, self.cover)
             else:
                 if not TRICK_MODE:
                     self.setChecked(True)
                 else:
                     REVEALED_COUNT -= 1
-            self.parent().parent().showMessage(str(MAP_Z - MARKED_COUNT) + " mines remianed")
+            self.parent().parent().show_message(str(MAP_Z - MARKED_COUNT) + " mines remianed")
     
-    def autoMark(self):
-        print "Auto Mark (" + str(self.x) + ", " + str(self.y) + ")"
+    def auto_mark(self):
+        print("Auto Mark (" + str(self.x) + ", " + str(self.y) + ")")
         while not GAME_TERMINATED and self.cover != SYMBOL_FLAG:
-            self.rightClick()
+            self.right_click()
     
     def reveal(self, flag):
         if self.haveMine:
@@ -197,28 +201,29 @@ class land(QtGui.QPushButton):
             else:
                 self.setToolTip(str(self.x + MAP_X * self.y) + "(" + str(self.x) + ", " + str(self.y) + ")")
 
-class MineField(QtGui.QWidget):
+
+class MineField(QtWidgets.QWidget):
     def __init__(self):
-        QtGui.QWidget.__init__(self)
-        self.initMineField()
+        super(MineField, self).__init__()
+        self.init_mine_field()
     
-    def initMineField(self):
-        grid = QtGui.QGridLayout()
+    def init_mine_field(self):
+        grid = QtWidgets.QGridLayout()
         grid.setSpacing(0)
         
         for y in range(MAP_Y):
             for x in range(MAP_X):
-                tmpLand = land(x, y)
-                tmpLand.clicked.connect(self.leftClick)
-                tmpLand.customContextMenuRequested.connect(self.rightClick)
+                tmpLand = Land(x, y)
+                tmpLand.clicked.connect(self.left_click)
+                tmpLand.customContextMenuRequested.connect(self.right_click)
                 MAP.append(tmpLand)
                 grid.addWidget(tmpLand, y, x)
         
-        self.generateMap()
+        self.generate_map()
         
         self.setLayout(grid)
         
-    def generateMap(self):
+    def generate_map(self):
         global REVEALED_COUNT
         global MARKED_COUNT
         global GAME_TERMINATED
@@ -245,80 +250,84 @@ class MineField(QtGui.QWidget):
                 if MAP[x + MAP_X * y].haveMine:
                     MAP[x + MAP_X * y].content = SYMBOL_MINE
                 else:
-                    mineNum = 0
-                    #NW
+                    mine_num = 0
+                    # NW
                     if x - 1 >= 0 and y - 1 >= 0 and MAP[(x - 1) + MAP_X * (y - 1)].haveMine:
-                        mineNum += 1
-                    #W
+                        mine_num += 1
+                    # W
                     if x - 1 >= 0 and MAP[(x - 1) + MAP_X * y].haveMine:
-                        mineNum += 1
-                    #SW
+                        mine_num += 1
+                    # SW
                     if x - 1 >= 0 and y + 1 <MAP_Y and MAP[(x - 1) + MAP_X * (y + 1)].haveMine:
-                        mineNum += 1
-                    #N
+                        mine_num += 1
+                    # N
                     if y - 1 >= 0 and MAP[x + MAP_X * (y - 1)].haveMine:
-                        mineNum += 1
-                    #S
+                        mine_num += 1
+                    # S
                     if y + 1 < MAP_Y and MAP[x + MAP_X * (y + 1)].haveMine:
-                        mineNum += 1
-                    #NE
+                        mine_num += 1
+                    # NE
                     if x + 1 < MAP_X and y - 1 >= 0 and MAP[(x + 1) + MAP_X * (y -1)].haveMine:
-                        mineNum += 1
-                    #E
+                        mine_num += 1
+                    # E
                     if x + 1 < MAP_X and MAP[(x + 1) + MAP_X * y].haveMine:
-                        mineNum += 1
-                    #SE
+                        mine_num += 1
+                    # SE
                     if x + 1 < MAP_X and y + 1 < MAP_Y and MAP[(x + 1) + MAP_X * (y + 1)].haveMine:
-                        mineNum += 1
-                    if mineNum == 0:
-                        MAP[x + MAP_X * y].mineNum = mineNum
+                        mine_num += 1
+                    if mine_num == 0:
+                        MAP[x + MAP_X * y].mine_num = mine_num
                         MAP[x + MAP_X * y].content = " "
-                    elif mineNum > 0:
-                        MAP[x + MAP_X * y].mineNum = mineNum
-                        MAP[x + MAP_X * y].content = str(mineNum)
+                    elif mine_num > 0:
+                        MAP[x + MAP_X * y].mine_num = mine_num
+                        MAP[x + MAP_X * y].content = str(mine_num)
     
-    def checkEndGame(self, x, y):
+    def check_end_game(self, x, y):
         global GAME_TERMINATED
         global REVEALED_COUNT
         if MAP[x + MAP_X * y].haveMine:
             GAME_TERMINATED = True
-            self.parent().showMessage("YOU FAILED")
+            self.parent().show_message("YOU FAILED")
             for i in MAP:
                     if i.haveMine:
                         i.cover = SYMBOL_MINE
-                        self.buttonSetText(i, SYMBOL_MINE)
+                        self.button_set_text(i, SYMBOL_MINE)
         elif REVEALED_COUNT == MAP_X * MAP_Y - MAP_Z:
             GAME_TERMINATED = True
-            self.parent().showMessage("YOU WIN")
+            self.parent().show_message("YOU WIN")
             for x in range(MAP_X):
                 for y in range(MAP_Y):
                     if MAP[x + MAP_X * y].haveMine:
                         MAP[x + MAP_X * y].cover = SYMBOL_FLAG
-                        self.buttonSetText(MAP[x + MAP_X * y], SYMBOL_FLAG)
-    
-    def buttonSetText(self, button, text):
+                        self.button_set_text(MAP[x + MAP_X * y], SYMBOL_FLAG)
+
+    @staticmethod
+    def button_set_text(button, text):
         button.setText(text)
     
-    def leftClick(self):
-        print "Left Click"
-        self.sender().leftClick()
+    def left_click(self):
+        print("Left Click")
+        self.sender().left_click()
     
-    def rightClick(self):
-        print "Right Click"
-        self.sender().rightClick()
+    def right_click(self):
+        print("Right Click")
+        self.sender().right_click()
 
-class UI(QtGui.QMainWindow):
+
+class UI(QtWidgets.QMainWindow):
+    mine_field = None
+
     def __init__(self):
-        QtGui.QMainWindow.__init__(self)
+        QtWidgets.QMainWindow.__init__(self)
         self.status = ""
-        self.initUI()
+        self.init_ui()
      
-    def initUI(self):
-        self.mineField = MineField()
+    def init_ui(self):
+        self.mine_field = MineField()
         
-        self.setCentralWidget(self.mineField)
+        self.setCentralWidget(self.mine_field)
         self.adjustSize()
-        self.setWindowFlags(QtCore.Qt.WindowMinimizeButtonHint)
+        # self.setWindowFlags(QtCore.Qt.WindowMinimizeButtonHint)
         self.move(300, 150)
         icon = QtGui.QIcon()
         icon.addPixmap(QtGui.QPixmap("Mine.ico"))
@@ -328,18 +337,18 @@ class UI(QtGui.QMainWindow):
         
         self.show()
     
-    def showMessage(self, ss):
+    def show_message(self, ss):
         self.statusBar().showMessage(self.status + ss)
     
-    def setStatus(self, ss):
+    def set_status(self, ss):
         self.status = ss
         self.statusBar().showMessage(self.status)
     
     def keyPressEvent(self, event):
         if event.key() < 256:
-            print chr(event.key())
+            print(chr(event.key()))
         else:
-            print event.key()
+            print(event.key())
         
         global MAP_X
         global MAP_Y
@@ -355,254 +364,253 @@ class UI(QtGui.QMainWindow):
         global AUTO_RANDOM_CLICK
         global AUTO_SOLVING
         
-        if event.key() == QtCore.Qt.Key_Escape:
+        if event.key() == QtCore.Qt.Key.Key_Escape:
             self.close()
-        elif event.key() == QtCore.Qt.Key_R:
-            self.mineField.generateMap()
+        elif event.key() == QtCore.Qt.Key.Key_R:
+            self.mine_field.generate_map()
             self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-            self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_Q:
+            self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_Q:
             MAP_X, MAP_Y, MAP_Z = 9, 9, 10
             del MAP[:]
-            del self.mineField
-            self.initUI()
-            self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_W:
+            del self.mine_field
+            self.init_ui()
+            self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_W:
             MAP_X, MAP_Y, MAP_Z = 16, 16, 40
             del MAP[:]
-            del self.mineField
-            self.initUI()
-            self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_E:
+            del self.mine_field
+            self.init_ui()
+            self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_E:
             MAP_X, MAP_Y, MAP_Z = 30, 16, 99
             del MAP[:]
-            del self.mineField
-            self.initUI()
-            self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_Y:
+            del self.mine_field
+            self.init_ui()
+            self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_Y:
             MAP_X += 5
             del MAP[:]
-            del self.mineField
-            self.initUI()
-            self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_U:
+            del self.mine_field
+            self.init_ui()
+            self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_U:
             MAP_X += 1
             del MAP[:]
-            del self.mineField
-            self.initUI()
-            self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_I:
+            del self.mine_field
+            self.init_ui()
+            self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_I:
             if MAP_X - 1 >= 10 and (MAP_X - 1) * MAP_Y > MAP_Z:
                 MAP_X -= 1
                 del MAP[:]
-                del self.mineField
-                self.initUI()
-                self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_O:
+                del self.mine_field
+                self.init_ui()
+                self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_O:
             if MAP_X - 5 >= 10 and (MAP_X - 5) * MAP_Y > MAP_Z:
                 MAP_X -= 5
                 del MAP[:]
-                del self.mineField
-                self.initUI()
-                self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_H:
+                del self.mine_field
+                self.init_ui()
+                self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_H:
             MAP_Y += 5
             del MAP[:]
-            del self.mineField
-            self.initUI()
-            self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_J:
+            del self.mine_field
+            self.init_ui()
+            self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_J:
             MAP_Y += 1
             del MAP[:]
-            del self.mineField
-            self.initUI()
-            self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_K:
+            del self.mine_field
+            self.init_ui()
+            self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_K:
             if MAP_X - 1 >= 10 and MAP_X * (MAP_Y - 1) > MAP_Z:
                 MAP_Y -= 1
                 del MAP[:]
-                del self.mineField
-                self.initUI()
-                self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_L:
+                del self.mine_field
+                self.init_ui()
+                self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_L:
             if MAP_Y - 5 >= 10 and MAP_X * (MAP_Y - 5) > MAP_Z:
                 MAP_Y -= 5
                 del MAP[:]
-                del self.mineField
-                self.initUI()
-                self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_N:
+                del self.mine_field
+                self.init_ui()
+                self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_N:
             if MAP_Z + 5 < MAP_X * MAP_Y:
                 MAP_Z += 5
-                self.mineField.generateMap()
+                self.mine_field.generate_map()
                 self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-                self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_M:
+                self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_M:
             if MAP_Z + 1 < MAP_X * MAP_Y:
                 MAP_Z += 1
-                self.mineField.generateMap()
+                self.mine_field.generate_map()
                 self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-                self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_Comma:
+                self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_Comma:
             if MAP_Z - 1 > 0:
                 MAP_Z -= 1
-                self.mineField.generateMap()
+                self.mine_field.generate_map()
                 self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-                self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_Period:
+                self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_Period:
             if MAP_Z - 5 > 0:
                 MAP_Z -= 5
-                self.mineField.generateMap()
+                self.mine_field.generate_map()
                 self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-                self.showMessage("New Game Ready")
-        elif event.key() == QtCore.Qt.Key_T:
+                self.show_message("New Game Ready")
+        elif event.key() == QtCore.Qt.Key.Key_T:
             TRICK_MODE = not TRICK_MODE
             if TRICK_MODE:
-                self.setStatus("(Trick Mode On)")
+                self.set_status("(Trick Mode On)")
             else:
-                self.setStatus("(Trick Mode Off)")
-        elif event.key() == QtCore.Qt.Key_S and TRICK_MODE:
+                self.set_status("(Trick Mode Off)")
+        elif event.key() == QtCore.Qt.Key.Key_S and TRICK_MODE:
             REVEALED = not REVEALED
             for i in range(len(MAP)):
                 MAP[i].reveal(REVEALED)
-        elif event.key() == QtCore.Qt.Key_R and TRICK_MODE:
+        elif event.key() == QtCore.Qt.Key.Key_R and TRICK_MODE:
             REVEALED_COUNT = 0
             MARKED_COUNT = 0
             for i in range(len(MAP)):
                 MAP[i].setChecked(False)
                 MAP[i].cover = SYMBOL_BLANK
-                self.mineField.buttonSetText(MAP[i], MAP[i].cover)
-        elif event.key() == QtCore.Qt.Key_A:
-            global AUTO_SOLVING
+                self.mine_field.button_set_text(MAP[i], MAP[i].cover)
+        elif event.key() == QtCore.Qt.Key.Key_A:
             startTime = datetime.datetime.now()
             AUTO_SOLVING = True
             while AUTO_SOLVING and not GAME_TERMINATED:
                 AUTO_SOLVING = AI().solve()
                 self.update()
             endTime = datetime.datetime.now()
-            print "Usage Time: " + str((endTime - startTime).seconds) + "." + str((endTime - startTime).microseconds)
-        elif event.key() == QtCore.Qt.Key_F:
-            global AUTO_SOLVING
+            print("Usage Time: " + str((endTime - startTime).seconds) + "." + str((endTime - startTime).microseconds))
+        elif event.key() == QtCore.Qt.Key.Key_F:
             while AUTO_SOLVING:
-                self.mineField.generateMap()
+                self.mine_field.generate_map()
                 self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-                self.showMessage("New Game Ready")
+                self.show_message("New Game Ready")
                 while AUTO_SOLVING and not GAME_TERMINATED:
                     AUTO_SOLVING = AI().solve()
                     self.update()
-        elif event.key() == QtCore.Qt.Key_Z:
+        elif event.key() == QtCore.Qt.Key.Key_Z:
             AI().solve()
-        elif event.key() == QtCore.Qt.Key_X:
-            AI().randomClick(1)
-        elif event.key() == QtCore.Qt.Key_C:
+        elif event.key() == QtCore.Qt.Key.Key_X:
+            AI().random_click(1)
+        elif event.key() == QtCore.Qt.Key.Key_C:
             AUTO_RANDOM_CLICK = not AUTO_RANDOM_CLICK   
 
+
 def main():
-    app = QtGui.QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     global ui
     ui = UI()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
-class AI():
+
+class AI(object):
     def __init__(self):
-        self.conditionList = []    #[land_id, mineNum, ...]
+        self.conditionList = []  # [land_id, mine_num, ...]
         self.nextID = -1
         self.clickOrMark = 0
         self.debugFlag = False
     
     def solve(self):
         global AUTO_RANDOM_CLICK
-        print "===AI==="
-        self.collectCondition()
+        print("===AI===")
+        self.collect_condition()
         if self.debugFlag:
             for i in self.conditionList:
-                print i
-        print "Try to analyse ..."
-        if self.analyseCondition():
+                print(i)
+        print("Try to analyse ...")
+        if self.analyse_condition():
             ui.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : D")
             if self.debugFlag:
                 for i in self.conditionList:
-                    print i
+                    print(i)
             return True
         else:
-            print "No conclusion found."
+            print("No conclusion found.")
             ui.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : (")
             if AUTO_RANDOM_CLICK:
-                self.randomClick(1)
+                self.random_click(1)
                 return True
             else:
                 return False
     
-    def collectCondition(self):
+    def collect_condition(self):
         for i in MAP:
-            if i.isChecked() and i.mineNum != 0:
+            if i.isChecked() and i.mine_num != 0:
                 x, y = i.x, i.y
-                tmpList = []
-                tmpList.append(x + MAP_X * y)
-                tmpList.append(i.mineNum)
-                #NW
+                tmp_list = [x + MAP_X * y, i.mine_num]
+                # NW
                 if x - 1 >= 0 and y - 1 >= 0 and not MAP[(x - 1) + MAP_X * (y - 1)].isChecked() and MAP[(x - 1) + MAP_X * (y - 1)].cover != SYMBOL_FLAG:
-                    tmpList.append((x - 1) + MAP_X * (y - 1))
-                #N
+                    tmp_list.append((x - 1) + MAP_X * (y - 1))
+                # N
                 if y - 1 >= 0 and not MAP[x + MAP_X * (y - 1)].isChecked() and MAP[x + MAP_X * (y - 1)].cover != SYMBOL_FLAG:
-                    tmpList.append(x + MAP_X * (y - 1))
-                #NE
+                    tmp_list.append(x + MAP_X * (y - 1))
+                # NE
                 if x + 1 < MAP_X and y - 1 >= 0 and not MAP[(x + 1) + MAP_X * (y - 1)].isChecked() and MAP[(x + 1) + MAP_X * (y - 1)].cover != SYMBOL_FLAG:
-                    tmpList.append((x + 1) + MAP_X * (y - 1))
-                #W
+                    tmp_list.append((x + 1) + MAP_X * (y - 1))
+                # W
                 if x - 1 >= 0 and not MAP[(x - 1) + MAP_X * y].isChecked() and MAP[(x - 1) + MAP_X * y].cover != SYMBOL_FLAG:
-                    tmpList.append((x - 1) + MAP_X * y)
-                #E
+                    tmp_list.append((x - 1) + MAP_X * y)
+                # E
                 if x + 1 < MAP_X and not MAP[(x + 1) + MAP_X * y].isChecked() and MAP[(x + 1) + MAP_X * y].cover != SYMBOL_FLAG:
-                    tmpList.append((x + 1) + MAP_X * y)
-                #SW
+                    tmp_list.append((x + 1) + MAP_X * y)
+                # SW
                 if x - 1 >= 0 and y + 1 <MAP_Y and not MAP[(x - 1) + MAP_X * (y + 1)].isChecked() and MAP[(x - 1) + MAP_X * (y + 1)].cover != SYMBOL_FLAG:
-                    tmpList.append((x - 1) + MAP_X * (y + 1))
-                #S
+                    tmp_list.append((x - 1) + MAP_X * (y + 1))
+                # S
                 if y + 1 < MAP_Y and not MAP[x + MAP_X * (y + 1)].isChecked() and MAP[x+ MAP_X * (y + 1)].cover != SYMBOL_FLAG:
-                    tmpList.append(x + MAP_X * (y + 1))
-                #SE
+                    tmp_list.append(x + MAP_X * (y + 1))
+                # SE
                 if x + 1 < MAP_X and y + 1 < MAP_Y and not MAP[(x + 1) + MAP_X * (y + 1)].isChecked() and MAP[(x + 1) + MAP_X * (y + 1)].cover != SYMBOL_FLAG:
-                    tmpList.append((x + 1) + MAP_X * (y + 1))
-                flagNum = 0
-                #NW
+                    tmp_list.append((x + 1) + MAP_X * (y + 1))
+                flag_num = 0
+                # NW
                 if x - 1 >= 0 and y - 1 >= 0 and not MAP[(x - 1) + MAP_X * (y - 1)].isChecked() and MAP[(x - 1) + MAP_X * (y - 1)].cover == SYMBOL_FLAG:
-                    flagNum += 1
-                #N
+                    flag_num += 1
+                # N
                 if y - 1 >= 0 and not MAP[x + MAP_X * (y - 1)].isChecked() and MAP[x + MAP_X * (y - 1)].cover == SYMBOL_FLAG:
-                    flagNum += 1
-                #NE
+                    flag_num += 1
+                # NE
                 if x + 1 < MAP_X and y - 1 >= 0 and not MAP[(x + 1) + MAP_X * (y - 1)].isChecked() and MAP[(x + 1) + MAP_X * (y -1)].cover == SYMBOL_FLAG:
-                    flagNum += 1
-                #W
+                    flag_num += 1
+                # W
                 if x - 1 >= 0 and not MAP[(x - 1) + MAP_X * y].isChecked() and MAP[(x - 1) + MAP_X * y].cover == SYMBOL_FLAG:
-                    flagNum += 1
-                #E
+                    flag_num += 1
+                # E
                 if x + 1 < MAP_X and not MAP[(x + 1) + MAP_X * y].isChecked() and MAP[(x + 1) + MAP_X * y].cover == SYMBOL_FLAG:
-                    flagNum += 1
-                #SW
+                    flag_num += 1
+                # SW
                 if x - 1 >= 0 and y + 1 <MAP_Y and not MAP[(x - 1) + MAP_X * (y + 1)].isChecked() and MAP[(x - 1) + MAP_X * (y + 1)].cover == SYMBOL_FLAG:
-                    flagNum += 1
-                #S
+                    flag_num += 1
+                # S
                 if y + 1 < MAP_Y and not MAP[x + MAP_X * (y + 1)].isChecked() and MAP[x + MAP_X * (y + 1)].cover == SYMBOL_FLAG:
-                    flagNum += 1
-                #SE
+                    flag_num += 1
+                # SE
                 if x + 1 < MAP_X and y + 1 < MAP_Y and not MAP[(x + 1) + MAP_X * (y + 1)].isChecked() and MAP[(x + 1) + MAP_X * (y + 1)].cover == SYMBOL_FLAG:
-                    flagNum += 1
-                tmpList[1] = i.mineNum - flagNum
-                if tmpList[1] != 0 or len(tmpList) - 2 != 0:
-                    self.conditionList.append(tmpList)
-    
-    def randomClick(self, num):
-        print "Random Click"
+                    flag_num += 1
+                tmp_list[1] = i.mine_num - flag_num
+                if tmp_list[1] != 0 or len(tmp_list) - 2 != 0:
+                    self.conditionList.append(tmp_list)
+
+    @staticmethod
+    def random_click(num):
+        print("Random Click")
         i = 0
         while i < num:
             k = randint(0, MAP_X * MAP_Y -1)
             if not MAP[k].isChecked() and not MAP[k].cover == SYMBOL_FLAG:
-                MAP[k].autoLeftClick()
+                MAP[k].auto_left_click()
                 i += 1
     
-    def analyseCondition(self):
+    def analyse_condition(self):
         flag = False
         while True:
             for i in range(len(self.conditionList)):
@@ -610,51 +618,54 @@ class AI():
                     for k in self.conditionList[i][2:]:
                         if MAP[k].cover != SYMBOL_FLAG:
                             if AUTO_SOLVING:
-                                MAP[k].autoLeftClick()
+                                MAP[k].auto_left_click()
                             else:
-                                ui.showMessage(str(k) + " is empty")
+                                ui.show_message(str(k) + " is empty")
                             flag = True
                             break
                 elif self.conditionList[i][1] == len(self.conditionList[i]) - 2:
                     for k in range(2, len(self.conditionList[i])):
                         if AUTO_SOLVING:
-                            MAP[self.conditionList[i][k]].autoMark()
+                            MAP[self.conditionList[i][k]].auto_mark()
                         else:
-                            ui.showMessage(str(self.conditionList[i][k]) + " have mine")
+                            ui.show_message(str(self.conditionList[i][k]) + " have mine")
                         flag = True
                         break
                 if flag: break
             if flag: break
             for i in range(len(self.conditionList) - 1):
                 for j in range(i + 1, len(self.conditionList)):
-                    if self.conditionList[i][1] == self.conditionList[j][1] and len(self.conditionList[i]) != len(self.conditionList[j]) and self.isInclude(self.conditionList[i], self.conditionList[j]):
-                        tmpList = self.sub(self.conditionList[i], self.conditionList[j])
-                        #for k in tmpList:
-                            #MAP[k].autoLeftClick()
+                    if self.conditionList[i][1] == self.conditionList[j][1] and len(self.conditionList[i]) != len(self.conditionList[j]) and self.is_include(self.conditionList[i], self.conditionList[j]):
+                        tmp_list = self.sub(self.conditionList[i], self.conditionList[j])
+                        # for k in tmp_list:
+                        #     MAP[k].auto_left_click()
                         if AUTO_SOLVING:
-                            MAP[tmpList[0]].autoLeftClick()
+                            MAP[tmp_list[0]].auto_left_click()
                         else:
-                            ui.showMessage(str(tmpList[0]) + " is empty.")
+                            ui.show_message(str(tmp_list[0]) + " is empty.")
                         flag = True
-                    elif self.conditionList[i][1] != self.conditionList[j][1] and abs(self.conditionList[i][1] - self.conditionList[j][1]) == abs(len(self.conditionList[i]) - len(self.conditionList[j])) and self.isInclude(self.conditionList[i], self.conditionList[j]):
-                        #if self.conditionList[i][1] > self.conditionList[j][1]:
-                            #tmpList = self.conditionList[j][2:]
-                        #else:
-                            #tmpList = self.conditionList[i][2:]
-                        tmpList = self.sub(self.conditionList[i], self.conditionList[j])
-                        #for k in tmpList:
-                            #MAP[k].autoMark()
+                    elif self.conditionList[i][1] != self.conditionList[j][1] and abs(self.conditionList[i][1] - self.conditionList[j][1]) == abs(len(self.conditionList[i]) - len(self.conditionList[j])) and self.is_include(self.conditionList[i], self.conditionList[j]):
+                        # if self.conditionList[i][1] > self.conditionList[j][1]:
+                        #     tmp_list = self.conditionList[j][2:]
+                        # else:
+                        #     tmp_list = self.conditionList[i][2:]
+                        tmp_list = self.sub(self.conditionList[i], self.conditionList[j])
+                        # for k in tmp_list:
+                        #     MAP[k].auto_mark()
                         if AUTO_SOLVING:
-                            MAP[tmpList[0]].autoMark()
+                            MAP[tmp_list[0]].auto_mark()
                         else:
-                            ui.showMessage(str(tmpList[0]) + " have mine.")
+                            ui.show_message(str(tmp_list[0]) + " have mine.")
                         flag = True
-                    if flag: break
-                if flag: break
+                    if flag:
+                        break
+                if flag:
+                    break
             break
         return flag
-    
-    def isInclude(self, a, b):
+
+    @staticmethod
+    def is_include(a, b):
         if len(a) < len(b):
             tmp = a
             a = b
@@ -667,11 +678,12 @@ class AI():
                 k += 1
             elif a[i] < b[j]:
                 i += 1
-            else:   #a[i] > b[j]
+            else:   # a[i] > b[j]
                 j += 1
         return k == len(b) - 2
-    
-    def sub(self, a, b):
+
+    @staticmethod
+    def sub(a, b):
         i, j = 0, 0
         c, d = a[2:], b[2:]
         while i < len(c) and j < len(d):
@@ -680,13 +692,14 @@ class AI():
                 d.remove(d[j])
             elif c[i] < d[j]:
                 i += 1
-            else:   #c[i] > d[j]
+            else:   # c[i] > d[j]
                 j += 1
         if len(c) != 0:
-            tmpList = c
+            tmp_list = c
         else:
-            tmpList = d
-        return tmpList
+            tmp_list = d
+        return tmp_list
+
 
 if __name__ == '__main__':
     main()
