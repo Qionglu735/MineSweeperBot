@@ -28,6 +28,41 @@ class Land(QPushButton):
     have_mine = False
     adjacent_mine_count = 0
     checked = False
+    # QPushButton
+    # {
+    #     background-color: #434343;
+    #     color: FONT_COLOR;
+    # }
+    # QPushButton: pressed
+    # {
+    #     border: 2px solid red;
+    # }
+    # QPushButton:checked {
+    #     background-color: #232323;
+    # }
+    style_sheet = """
+        QPushButton {
+            color: FONT_COLOR;
+            font: "Roman Times";
+            font-size: 10;
+            font-weight: bold;
+        }
+        QPushButton:pressed {
+            border: 2px solid #a02020;
+        }
+    """
+    focus_style_sheet = """
+        QPushButton {
+            color: FONT_COLOR;
+            font: "Roman Times";
+            font-size: 10;
+            font-weight: bold;
+            border: 2px solid #a02020;
+        }
+        QPushButton:pressed {
+            border: 2px solid #a02020;
+        }asg
+    """
 
     def __init__(self, parent, x, y):
         super().__init__(text=SYMBOL_BLANK)
@@ -36,10 +71,9 @@ class Land(QPushButton):
         self.id = x + parent.field_width * y
         
         self.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
-        q_font = QtGui.QFont("Roman Times", 10)
-        q_font.setBold(True)
-        self.setFont(q_font)
         self.setToolTip(str(x + MAP_X * y) + "(" + str(x) + ", " + str(y) + ")")
+
+        self.setStyleSheet(self.style_sheet.replace("FONT_COLOR", "white"))
         
         self.setCheckable(True)
         self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
@@ -51,17 +85,15 @@ class Land(QPushButton):
         field_width = self.parent().field_width
         field_height = self.parent().field_height
 
-        # if MainWindow().game_terminated or not MainWindow().game_terminated and self.cover != SYMBOL_BLANK:
-        #     if self.isChecked():
-        #         self.setChecked(False)
-        #     else:
-        #         self.setChecked(True)
+        if MainWindow().game_terminated or not MainWindow().game_terminated and self.cover != SYMBOL_BLANK:
+            if self.isChecked():
+                self.setChecked(False)
+            else:
+                self.setChecked(True)
         if self.isChecked():
             print(f"Left Click ({self.x}, {self.y})")
             if len([x for x in mine_field.land_list if x.have_mine is True]) == 0:
                 mine_field.generate_mine(self.x, self.y)
-
-            self.setText(self.content)
             self.parent().check_end_game(self.x, self.y)
             if not MainWindow().game_terminated and self.content == SYMBOL_BLANK:
                 for _x in [-1, 0, 1]:
@@ -73,10 +105,10 @@ class Land(QPushButton):
                             if not land.isChecked():
                                 land.left_click()
                 self.parent().check_end_game(self.x, self.y)
+            self.update_ui()
         else:
             # print(f"Chain Click ({self.x}, {self.y})")
             self.setChecked(True)
-            self.setText(self.content)
             flag_num = 0
             for x in [-1, 0, 1]:
                 for y in [-1, 0, 1]:
@@ -95,6 +127,7 @@ class Land(QPushButton):
                             land = self.parent().land_list[(self.x + x) + field_width * (self.y + y)]
                             if not land.isChecked() and land.cover != SYMBOL_FLAG:
                                 land.left_click()
+            self.update_ui()
 
         if not MainWindow().game_terminated:
             mine_field = self.parent()
@@ -115,12 +148,12 @@ class Land(QPushButton):
                     self.cover = SYMBOL_UNKNOWN
                 elif self.cover == SYMBOL_UNKNOWN:
                     self.cover = SYMBOL_BLANK
-                self.setText(self.cover)
             # else:
             #     if not MainWindow().cheat_mode:
             #         self.setChecked(True)
             mine_field = self.parent()
             MainWindow().show_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
+        self.update_ui()
     
     def auto_mark(self):
         print(f"Auto Mark ({self.x}, {self.y})")
@@ -133,6 +166,40 @@ class Land(QPushButton):
                 self.setToolTip(f"! {self.x + MAP_X * self.y}({self.x}, {self.y}) !")
             else:
                 self.setToolTip(f"{self.x + MAP_X * self.y}({self.x}, {self.y})")
+
+    def update_ui(self, focus=True):
+        style_sheet = self.focus_style_sheet if focus else self.style_sheet
+        if self.isChecked():
+            self.setText(self.content)
+            color_dict = {
+                " ": "white",
+                "X": "red",
+                "1": "#8080f0",
+                "2": "#80f080",
+                "3": "#f08080",
+                "4": "#4040f0",
+                "5": "#a0a040",
+                "6": "#40a040",
+                "7": "#000000",
+                "8": "#404040",
+            }
+            style_sheet = style_sheet.replace("FONT_COLOR", color_dict[self.content])
+        else:
+            self.setText(self.cover)
+            color_dict = {
+                " ": "white",
+                "!": "#f02020",
+                "?": "#2020f0",
+            }
+            style_sheet = style_sheet.replace("FONT_COLOR", color_dict[self.cover])
+
+        self.setStyleSheet(style_sheet)
+
+        if focus:
+            for land in MainWindow().mine_field.land_list:
+                if land == self:
+                    continue
+                land.update_ui(focus=False)
 
     def to_string(self):
         return f"{self.id} ({self.x}, {self.y})"
