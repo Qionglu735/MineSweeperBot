@@ -1,37 +1,39 @@
 
 from random import randint
-from PySide6 import QtGui, QtCore, QtWidgets
+from PySide6 import QtGui, QtCore
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget,  QGridLayout, QPushButton
+
 import datetime
+import itertools
 import sys
 
-MAP_X = 16  # NW N NE
-MAP_Y = 16  # W  O  E
-MAP_Z = 40  # SW S SE
-MAP = []
-
-REVEALED_COUNT = 0
-MARKED_COUNT = 0
-
-TRICK_MODE = False
-REVEALED = False
-GAME_TERMINATED = False
-
-AUTO_RANDOM_CLICK = False
-AUTO_SOLVING = False
+MAP_X = 9
+MAP_Y = 9
+MINE_COUNT = 10
 
 SYMBOL_BLANK = " "
-SYMBOL_MINE = "O"
+SYMBOL_MINE = "X"
 SYMBOL_FLAG = "!"
 SYMBOL_UNKNOWN = "?"
 
 BUTTON_SIZE = 20
 
-ui = None
 
+class Land(QPushButton):
+    x = 0
+    y = 0
+    id = 0
+    cover = SYMBOL_BLANK
+    content = SYMBOL_BLANK
+    have_mine = False
+    adjacent_mine_count = 0
+    checked = False
 
-class Land(QtWidgets.QPushButton):
-    def __init__(self, x, y):
-        QtWidgets.QPushButton.__init__(self, SYMBOL_BLANK)
+    def __init__(self, parent, x, y):
+        super().__init__(text=SYMBOL_BLANK)
+
+        self.x, self.y = x, y
+        self.id = x + parent.field_width * y
         
         self.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
         q_font = QtGui.QFont("Roman Times", 10)
@@ -41,665 +43,534 @@ class Land(QtWidgets.QPushButton):
         
         self.setCheckable(True)
         self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
-        
-        self.x, self.y = x, y
-        self.cover, self.content = SYMBOL_BLANK, SYMBOL_BLANK
-        self.have_mine = False
-        self.mine_num = 0
     
     def left_click(self):
-        global GAME_TERMINATED
-        if GAME_TERMINATED or (not GAME_TERMINATED and self.cover != SYMBOL_BLANK):
-            if self.isChecked():
-                self.setChecked(False)
-            else:
-                self.setChecked(True)
-        elif self.isChecked():
-            self.parent().button_set_text(self, self.content)
-            global REVEALED_COUNT
-            REVEALED_COUNT += 1
+
+        mine_field = self.parent()
+
+        field_width = self.parent().field_width
+        field_height = self.parent().field_height
+
+        # if MainWindow().game_terminated or not MainWindow().game_terminated and self.cover != SYMBOL_BLANK:
+        #     if self.isChecked():
+        #         self.setChecked(False)
+        #     else:
+        #         self.setChecked(True)
+        if self.isChecked():
+            print(f"Left Click ({self.x}, {self.y})")
+            if len([x for x in mine_field.land_list if x.have_mine is True]) == 0:
+                mine_field.generate_mine(self.x, self.y)
+
+            self.setText(self.content)
             self.parent().check_end_game(self.x, self.y)
-            if not GAME_TERMINATED and self.content == " ":
-                x, y = self.x, self.y
-                tmp_x, tmp_y = [], []
-                # NW
-                if x - 1 >= 0 and y - 1 >= 0 and not MAP[(x - 1) + MAP_X * (y - 1)].isChecked():
-                    MAP[(x - 1) + MAP_X * (y - 1)].setChecked(True)
-                    tmp_x.append(x - 1)
-                    tmp_y.append(y - 1)
-                # W
-                if x - 1 >= 0 and not MAP[(x - 1) + MAP_X * y].isChecked():
-                    MAP[(x - 1) + MAP_X * y].setChecked(True)
-                    tmp_x.append(x - 1)
-                    tmp_y.append(y)
-                # SW
-                if x - 1 >= 0 and y + 1 <MAP_Y and not MAP[(x - 1) + MAP_X * (y + 1)].isChecked():
-                    MAP[(x - 1) + MAP_X * (y + 1)].setChecked(True)
-                    tmp_x.append(x - 1)
-                    tmp_y.append(y + 1)
-                # N
-                if y - 1 >= 0 and not MAP[x + MAP_X * (y - 1)].isChecked():
-                    MAP[x + MAP_X * (y - 1)].setChecked(True)
-                    tmp_x.append(x)
-                    tmp_y.append(y - 1)
-                # S
-                if y + 1 < MAP_Y and not MAP[x + MAP_X * (y + 1)].isChecked():
-                    MAP[x + MAP_X * (y + 1)].setChecked(True)
-                    tmp_x.append(x)
-                    tmp_y.append(y + 1)
-                # NE
-                if x + 1 < MAP_X and y - 1 >= 0 and not MAP[(x + 1) + MAP_X * (y -1)].isChecked():
-                    MAP[(x + 1) + MAP_X * (y -1)].setChecked(True)
-                    tmp_x.append(x + 1)
-                    tmp_y.append(y - 1)
-                # E
-                if x + 1 < MAP_X and not MAP[(x + 1) + MAP_X * y].isChecked():
-                    MAP[(x + 1) + MAP_X * y].setChecked(True)
-                    tmp_x.append(x + 1)
-                    tmp_y.append(y)
-                # SE
-                if x + 1 < MAP_X and y + 1 < MAP_Y and not MAP[(x + 1) + MAP_X * (y + 1)].isChecked():
-                    MAP[(x + 1) + MAP_X * (y + 1)].setChecked(True)
-                    tmp_x.append(x + 1)
-                    tmp_y.append(y + 1)
-                for i in range(len(tmp_x)):
-                    MAP[tmp_x[i] + MAP_X * tmp_y[i]].left_click()
+            if not MainWindow().game_terminated and self.content == SYMBOL_BLANK:
+                for _x in [-1, 0, 1]:
+                    for _y in [-1, 0, 1]:
+                        if _x == 0 and _y == 0:
+                            continue
+                        if 0 <= self.x + _x < field_width and 0 <= self.y + _y < field_height:
+                            land = self.parent().land_list[(self.x + _x) + field_width * (self.y + _y)]
+                            if not land.isChecked():
+                                land.left_click()
+                self.parent().check_end_game(self.x, self.y)
         else:
+            # print(f"Chain Click ({self.x}, {self.y})")
             self.setChecked(True)
-            x, y = self.x, self.y
+            self.setText(self.content)
             flag_num = 0
-            # NW
-            if x - 1 >= 0 and y - 1 >= 0 and not MAP[(x - 1) + MAP_X * (y - 1)].isChecked() and MAP[(x - 1) + MAP_X * (y - 1)].cover == SYMBOL_FLAG:
-                flag_num += 1
-            # W
-            if x - 1 >= 0 and not MAP[(x - 1) + MAP_X * y].isChecked() and MAP[(x - 1) + MAP_X * y].cover == SYMBOL_FLAG:
-                flag_num += 1
-            # SW
-            if x - 1 >= 0 and y + 1 <MAP_Y and not MAP[(x - 1) + MAP_X * (y + 1)].isChecked() and MAP[(x - 1) + MAP_X * (y + 1)].cover == SYMBOL_FLAG:
-                flag_num += 1
-            # N
-            if y - 1 >= 0 and not MAP[x + MAP_X * (y - 1)].isChecked() and MAP[x + MAP_X * (y - 1)].cover == SYMBOL_FLAG:
-                flag_num += 1
-            # S
-            if y + 1 < MAP_Y and not MAP[x + MAP_X * (y + 1)].isChecked() and MAP[x + MAP_X * (y + 1)].cover == SYMBOL_FLAG:
-                flag_num += 1
-            # NE
-            if x + 1 < MAP_X and y - 1 >= 0 and not MAP[(x + 1) + MAP_X * (y - 1)].isChecked() and MAP[(x + 1) + MAP_X * (y -1)].cover == SYMBOL_FLAG:
-                flag_num += 1
-            # E
-            if x + 1 < MAP_X and not MAP[(x + 1) + MAP_X * y].isChecked() and MAP[(x + 1) + MAP_X * y].cover == SYMBOL_FLAG:
-                flag_num += 1
-            # SE
-            if x + 1 < MAP_X and y + 1 < MAP_Y and not MAP[(x + 1) + MAP_X * (y + 1)].isChecked() and MAP[(x + 1) + MAP_X * (y + 1)].cover == SYMBOL_FLAG:
-                flag_num += 1
-            if flag_num == MAP[x + MAP_X * y].mine_num:
-                # NW
-                if x - 1 >= 0 and y - 1 >= 0 and not MAP[(x - 1) + MAP_X * (y - 1)].isChecked() and MAP[(x - 1) + MAP_X * (y - 1)].cover != SYMBOL_FLAG:
-                    MAP[(x - 1) + MAP_X * (y - 1)].auto_left_click()
-                # W
-                if x - 1 >= 0 and not MAP[(x - 1) + MAP_X * y].isChecked() and MAP[(x - 1) + MAP_X * y].cover != SYMBOL_FLAG:
-                    MAP[(x - 1) + MAP_X * y].auto_left_click()
-                # SW
-                if x - 1 >= 0 and y + 1 <MAP_Y and not MAP[(x - 1) + MAP_X * (y + 1)].isChecked() and MAP[(x - 1) + MAP_X * (y + 1)].cover != SYMBOL_FLAG:
-                    MAP[(x - 1) + MAP_X * (y + 1)].auto_left_click()
-                # N
-                if y - 1 >= 0 and not MAP[x + MAP_X * (y - 1)].isChecked() and MAP[x + MAP_X * (y - 1)].cover != SYMBOL_FLAG:
-                    MAP[x + MAP_X * (y - 1)].auto_left_click()
-                # S
-                if y + 1 < MAP_Y and not MAP[x + MAP_X * (y + 1)].isChecked() and MAP[x + MAP_X * (y + 1)].cover != SYMBOL_FLAG:
-                    MAP[x + MAP_X * (y + 1)].auto_left_click()
-                # NE
-                if x + 1 < MAP_X and y - 1 >= 0 and not MAP[(x + 1) + MAP_X * (y - 1)].isChecked() and MAP[(x + 1) + MAP_X * (y -1)].cover != SYMBOL_FLAG:
-                    MAP[(x + 1) + MAP_X * (y - 1)].auto_left_click()
-                # E
-                if x + 1 < MAP_X and not MAP[(x + 1) + MAP_X * y].isChecked() and MAP[(x + 1) + MAP_X * y].cover != SYMBOL_FLAG:
-                    MAP[(x + 1) + MAP_X * y].auto_left_click()
-                # SE
-                if x + 1 < MAP_X and y + 1 < MAP_Y and not MAP[(x + 1) + MAP_X * (y + 1)].isChecked() and MAP[(x + 1) + MAP_X * (y + 1)].cover != SYMBOL_FLAG:
-                    MAP[(x + 1) + MAP_X * (y + 1)].auto_left_click()
-        if not GAME_TERMINATED:
-            self.parent().parent().show_message(str(MAP_Z - MARKED_COUNT) + " mines remained")
-    
+            for x in [-1, 0, 1]:
+                for y in [-1, 0, 1]:
+                    if x == 0 and y == 0:
+                        continue
+                    if 0 <= self.x + x < field_width and 0 <= self.y + y < field_height:
+                        land = self.parent().land_list[(self.x + x) + field_width * (self.y + y)]
+                        if not land.isChecked() and land.cover == SYMBOL_FLAG:
+                            flag_num += 1
+            if flag_num == self.adjacent_mine_count:
+                for x in [-1, 0, 1]:
+                    for y in [-1, 0, 1]:
+                        if x == 0 and y == 0:
+                            continue
+                        if 0 <= self.x + x < field_width and 0 <= self.y + y < field_height:
+                            land = self.parent().land_list[(self.x + x) + field_width * (self.y + y)]
+                            if not land.isChecked() and land.cover != SYMBOL_FLAG:
+                                land.left_click()
+
+        if not MainWindow().game_terminated:
+            mine_field = self.parent()
+            MainWindow().show_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
+
     def auto_left_click(self):
-        print("Auto Left Click (" + str(self.x) + ", " + str(self.y) + ")")
+        print(f"Auto Left Click ({self.x}, {self.y})")
         self.setChecked(True)
         self.left_click()
     
     def right_click(self):
-        global GAME_TERMINATED
-        global MARKED_COUNT
-        global TRICK_MODE
-        global REVEALED_COUNT
-        
-        if not GAME_TERMINATED:
+        if not MainWindow().game_terminated:
+            print(f"Right Click ({self.x}, {self.y})")
             if not self.isChecked():
                 if self.cover == SYMBOL_BLANK:
                     self.cover = SYMBOL_FLAG
-                    MARKED_COUNT += 1
                 elif self.cover == SYMBOL_FLAG:
                     self.cover = SYMBOL_UNKNOWN
-                    MARKED_COUNT -= 1
                 elif self.cover == SYMBOL_UNKNOWN:
                     self.cover = SYMBOL_BLANK
-                self.parent().button_set_text(self, self.cover)
-            else:
-                if not TRICK_MODE:
-                    self.setChecked(True)
-                else:
-                    REVEALED_COUNT -= 1
-            self.parent().parent().show_message(str(MAP_Z - MARKED_COUNT) + " mines remianed")
+                self.setText(self.cover)
+            # else:
+            #     if not MainWindow().cheat_mode:
+            #         self.setChecked(True)
+            mine_field = self.parent()
+            MainWindow().show_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
     
     def auto_mark(self):
-        print("Auto Mark (" + str(self.x) + ", " + str(self.y) + ")")
-        while not GAME_TERMINATED and self.cover != SYMBOL_FLAG:
+        print(f"Auto Mark ({self.x}, {self.y})")
+        while not MainWindow().game_terminated and self.cover != SYMBOL_FLAG:
             self.right_click()
     
     def reveal(self, flag):
         if self.have_mine:
             if flag:
-                self.setToolTip("!" + str(self.x + MAP_X * self.y) + "(" + str(self.x) + ", " + str(self.y) + ")")
+                self.setToolTip(f"! {self.x + MAP_X * self.y}({self.x}, {self.y}) !")
             else:
-                self.setToolTip(str(self.x + MAP_X * self.y) + "(" + str(self.x) + ", " + str(self.y) + ")")
+                self.setToolTip(f"{self.x + MAP_X * self.y}({self.x}, {self.y})")
+
+    def to_string(self):
+        return f"{self.id} ({self.x}, {self.y})"
 
 
-class MineField(QtWidgets.QWidget):
-    def __init__(self):
-        super(MineField, self).__init__()
+class MineField(QWidget):
+    field_width = 0
+    field_height = 0
+    mine_count = 0
+
+    land_list = list()
+
+    def __init__(self, field_width=MAP_X, field_height=MAP_Y, mine_count=MINE_COUNT):
+        super().__init__()
+        self.field_width = min(max(9, field_width), 1000)
+        self.field_height = min(max(9, field_height), 1000)
+        self.mine_count = min(max(1, mine_count), self.field_width * self.field_height - 9)
         self.init_mine_field()
     
     def init_mine_field(self):
-        grid = QtWidgets.QGridLayout()
+        grid = QGridLayout()
         grid.setSpacing(0)
-        
-        for y in range(MAP_Y):
-            for x in range(MAP_X):
-                tmp_land = Land(x, y)
-                tmp_land.clicked.connect(self.left_click)
-                tmp_land.customContextMenuRequested.connect(self.right_click)
-                MAP.append(tmp_land)
-                grid.addWidget(tmp_land, y, x)
-        
-        self.generate_map()
-        
+
+        self.land_list = list()
+        for y in range(self.field_height):
+            for x in range(self.field_width):
+                land = Land(self, x, y)
+                land.clicked.connect(self.left_click)
+                land.customContextMenuRequested.connect(self.right_click)
+                self.land_list.append(land)
+                grid.addWidget(land, y, x)
+
         self.setLayout(grid)
 
-    @staticmethod
-    def generate_map():
-        global REVEALED_COUNT
-        global MARKED_COUNT
-        global GAME_TERMINATED
-        REVEALED_COUNT, MARKED_COUNT, GAME_TERMINATED = 0, 0, False
-        
-        for x in range(MAP_X):
-            for y in range(MAP_Y):
-                MAP[x + MAP_X * y].have_mine = False
-                MAP[x + MAP_X * y].setChecked(False)
-                MAP[x + MAP_X * y].cover = SYMBOL_BLANK
-                MAP[x + MAP_X * y].content = SYMBOL_BLANK
-                MAP[x + MAP_X * y].setText(SYMBOL_BLANK)
-        
-        for i in range(MAP_Z):
-            x = randint(0, MAP_X-1)
-            y = randint(0, MAP_Y-1)
-            while MAP[x + MAP_X * y].have_mine:
-                x = randint(0, MAP_X-1)
-                y = randint(0, MAP_Y-1)
-            MAP[x + MAP_X * y].have_mine = True
-        
-        for x in range(MAP_X):
-            for y in range(MAP_Y):
-                if MAP[x + MAP_X * y].have_mine:
-                    MAP[x + MAP_X * y].content = SYMBOL_MINE
-                else:
-                    mine_num = 0
-                    # NW
-                    if x - 1 >= 0 and y - 1 >= 0 and MAP[(x - 1) + MAP_X * (y - 1)].have_mine:
-                        mine_num += 1
-                    # W
-                    if x - 1 >= 0 and MAP[(x - 1) + MAP_X * y].have_mine:
-                        mine_num += 1
-                    # SW
-                    if x - 1 >= 0 and y + 1 <MAP_Y and MAP[(x - 1) + MAP_X * (y + 1)].have_mine:
-                        mine_num += 1
-                    # N
-                    if y - 1 >= 0 and MAP[x + MAP_X * (y - 1)].have_mine:
-                        mine_num += 1
-                    # S
-                    if y + 1 < MAP_Y and MAP[x + MAP_X * (y + 1)].have_mine:
-                        mine_num += 1
-                    # NE
-                    if x + 1 < MAP_X and y - 1 >= 0 and MAP[(x + 1) + MAP_X * (y -1)].have_mine:
-                        mine_num += 1
-                    # E
-                    if x + 1 < MAP_X and MAP[(x + 1) + MAP_X * y].have_mine:
-                        mine_num += 1
-                    # SE
-                    if x + 1 < MAP_X and y + 1 < MAP_Y and MAP[(x + 1) + MAP_X * (y + 1)].have_mine:
-                        mine_num += 1
-                    if mine_num == 0:
-                        MAP[x + MAP_X * y].mine_num = mine_num
-                        MAP[x + MAP_X * y].content = " "
-                    elif mine_num > 0:
-                        MAP[x + MAP_X * y].mine_num = mine_num
-                        MAP[x + MAP_X * y].content = str(mine_num)
-    
-    def check_end_game(self, x, y):
-        global GAME_TERMINATED
-        global REVEALED_COUNT
-        if MAP[x + MAP_X * y].have_mine:
-            GAME_TERMINATED = True
-            self.parent().show_message("YOU FAILED")
-            for i in MAP:
-                    if i.have_mine:
-                        i.cover = SYMBOL_MINE
-                        self.button_set_text(i, SYMBOL_MINE)
-        elif REVEALED_COUNT == MAP_X * MAP_Y - MAP_Z:
-            GAME_TERMINATED = True
-            self.parent().show_message("YOU WIN")
-            for x in range(MAP_X):
-                for y in range(MAP_Y):
-                    if MAP[x + MAP_X * y].have_mine:
-                        MAP[x + MAP_X * y].cover = SYMBOL_FLAG
-                        self.button_set_text(MAP[x + MAP_X * y], SYMBOL_FLAG)
+    def reset_mine_field(self):
+        for land in self.land_list:
+            land.setChecked(False)
+            land.cover = SYMBOL_BLANK
+            land.setText(land.cover)
 
-    @staticmethod
-    def button_set_text(button, text):
-        button.setText(text)
+    def generate_mine(self, safe_x=-9, safe_y=-9):
+        for x in range(self.field_width):
+            for y in range(self.field_height):
+                self.land_list[x + self.field_width * y].have_mine = False
+                self.land_list[x + self.field_width * y].adjacent_mine_count = 0
+                self.land_list[x + self.field_width * y].checked = False
+                self.land_list[x + self.field_width * y].cover = SYMBOL_BLANK
+                self.land_list[x + self.field_width * y].content = SYMBOL_BLANK
+                self.land_list[x + self.field_width * y].setChecked(False)
+                self.land_list[x + self.field_width * y].setText(SYMBOL_BLANK)
+
+        for _ in range(self.mine_count):
+            x, y = -1, -1
+            while x < 0 or y < 0 or self.land_list[x + self.field_width * y].have_mine:
+                x = randint(0, self.field_width - 1)
+                y = randint(0, self.field_height - 1)
+                if abs(x - safe_x) <= 1 and abs(y - safe_y) <= 1:
+                    x, y = -1, -1
+            self.land_list[x + self.field_width * y].have_mine = True
+            for _x in [-1, 0, 1]:
+                for _y in [-1, 0, 1]:
+                    if _x == 0 and _y == 0:
+                        continue
+                    if 0 <= (x + _x) < self.field_width and 0 <= (y + _y) < self.field_height:
+                        self.land_list[(x + _x) + self.field_width * (y + _y)].adjacent_mine_count += 1
+
+        for y in range(self.field_height):
+            for x in range(self.field_width):
+                land = self.land_list[x + self.field_width * y]
+                if land.have_mine:
+                    land.content = SYMBOL_MINE
+                elif land.adjacent_mine_count == 0:
+                    land.content = SYMBOL_BLANK
+                else:
+                    land.content = f"{land.adjacent_mine_count}"
+
+    def field_size(self):
+        return {
+            "field_width": self.field_width,
+            "field_height": self.field_height,
+            "mine_count": self.mine_count,
+        }
+
+    def revealed_land_count(self):
+        return len([x for x in self.land_list if x.isChecked()])
+
+    def marked_land_count(self):
+        return len([x for x in self.land_list if not x.isChecked() and x.cover == SYMBOL_FLAG])
+
+    def check_end_game(self, x, y):
+        if self.land_list[x + self.field_width * y].have_mine:
+            MainWindow().game_terminated = True
+            self.parent().show_message("YOU FAILED")
+            for land in self.land_list:
+                if land.have_mine:
+                    # land.cover = SYMBOL_MINE
+                    land.setText(SYMBOL_MINE)
+        elif self.revealed_land_count() == self.field_width * self.field_height - self.mine_count:
+            MainWindow().game_terminated = True
+            self.parent().show_message("YOU WIN")
+            for y in range(self.field_height):
+                for x in range(self.field_width):
+                    if self.land_list[x + self.field_width * y].have_mine:
+                        self.land_list[x + self.field_width * y].cover = SYMBOL_FLAG
+                        self.land_list[x + self.field_width * y].setText(SYMBOL_FLAG)
     
     def left_click(self):
-        print("Left Click")
         self.sender().left_click()
     
     def right_click(self):
-        print("Right Click")
         self.sender().right_click()
 
 
-class UI(QtWidgets.QMainWindow):
+def singleton(cls):
+    instances = {}
+
+    def get_instance(*args, **kwargs):
+        if cls not in instances:
+            instances[cls] = cls(*args, **kwargs)
+        return instances[cls]
+    return get_instance
+
+
+@singleton
+class MainWindow(QMainWindow):
     mine_field = None
+    game_terminated = False
+
+    cheat_mode = False
+    auto_click = False
+    auto_random_click = False
+
+    status = ""
 
     def __init__(self):
-        QtWidgets.QMainWindow.__init__(self)
-        self.status = ""
+        super().__init__()
         self.init_ui()
      
     def init_ui(self):
-        self.mine_field = MineField()
-        
-        self.setCentralWidget(self.mine_field)
-        self.adjustSize()
         # self.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint)
-        self.move(300, 150)
+        self.move(900, 1800)
         icon = QtGui.QIcon()
         icon.addPixmap(QtGui.QPixmap("Mine.ico"))
         self.setWindowIcon(icon)
-        self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-        self.statusBar().showMessage("New Game Ready")
-        
-        self.show()
+
+        self.init_mine_field()
+
+    def init_mine_field(self, field_width=0, field_height=0, mine_count=0):
+        if self.mine_field is not None:
+            field_size = self.mine_field.field_size()
+        else:
+            field_size = dict()
+        if field_width > 0:
+            field_size["field_width"] = field_width
+        if field_height > 0:
+            field_size["field_height"] = field_height
+        if mine_count > 0:
+            field_size["mine_count"] = mine_count
+
+        self.mine_field = MineField(**field_size)
+        self.game_terminated = False
+
+        self.setCentralWidget(self.mine_field)
+        self.adjustSize()
+        self.setWindowTitle(
+            f"{self.mine_field.field_width} "
+            f"X {self.mine_field.field_height} "
+            f"with {self.mine_field.mine_count} Mines :)"
+        )
+        self.show_message("New Game Ready")
     
-    def show_message(self, ss):
-        self.statusBar().showMessage(self.status + ss)
+    def show_message(self, msg):
+        self.statusBar().showMessage(self.status + msg)
     
-    def set_status(self, ss):
-        self.status = ss
+    def set_status(self, status):
+        self.status = status
         self.statusBar().showMessage(self.status)
     
     def keyPressEvent(self, event):
-        if event.key() < 256:
-            print(chr(event.key()))
-        else:
-            print(event.key())
-        
-        global MAP_X
-        global MAP_Y
-        global MAP_Z
-         
-        global REVEALED_COUNT
-        global MARKED_COUNT
-        
-        global TRICK_MODE
-        global REVEALED
-        global GAME_TERMINATED
-        
-        global AUTO_RANDOM_CLICK
-        global AUTO_SOLVING
+        # if event.key() < 256:
+        #     print(chr(event.key()))
+        # else:
+        #     print(event.key())
+
+        modifiers = QApplication.keyboardModifiers()
         
         if event.key() == QtCore.Qt.Key.Key_Escape:
             self.close()
         elif event.key() == QtCore.Qt.Key.Key_R:
-            self.mine_field.generate_map()
-            self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-            self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_Q:
-            MAP_X, MAP_Y, MAP_Z = 9, 9, 10
-            del MAP[:]
-            del self.mine_field
-            self.init_ui()
-            self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_W:
-            MAP_X, MAP_Y, MAP_Z = 16, 16, 40
-            del MAP[:]
-            del self.mine_field
-            self.init_ui()
-            self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_E:
-            MAP_X, MAP_Y, MAP_Z = 30, 16, 99
-            del MAP[:]
-            del self.mine_field
-            self.init_ui()
-            self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_Y:
-            MAP_X += 5
-            del MAP[:]
-            del self.mine_field
-            self.init_ui()
-            self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_U:
-            MAP_X += 1
-            del MAP[:]
-            del self.mine_field
-            self.init_ui()
-            self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_I:
-            if MAP_X - 1 >= 10 and (MAP_X - 1) * MAP_Y > MAP_Z:
-                MAP_X -= 1
-                del MAP[:]
-                del self.mine_field
-                self.init_ui()
-                self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_O:
-            if MAP_X - 5 >= 10 and (MAP_X - 5) * MAP_Y > MAP_Z:
-                MAP_X -= 5
-                del MAP[:]
-                del self.mine_field
-                self.init_ui()
-                self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_H:
-            MAP_Y += 5
-            del MAP[:]
-            del self.mine_field
-            self.init_ui()
-            self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_J:
-            MAP_Y += 1
-            del MAP[:]
-            del self.mine_field
-            self.init_ui()
-            self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_K:
-            if MAP_X - 1 >= 10 and MAP_X * (MAP_Y - 1) > MAP_Z:
-                MAP_Y -= 1
-                del MAP[:]
-                del self.mine_field
-                self.init_ui()
-                self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_L:
-            if MAP_Y - 5 >= 10 and MAP_X * (MAP_Y - 5) > MAP_Z:
-                MAP_Y -= 5
-                del MAP[:]
-                del self.mine_field
-                self.init_ui()
-                self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_N:
-            if MAP_Z + 5 < MAP_X * MAP_Y:
-                MAP_Z += 5
-                self.mine_field.generate_map()
-                self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-                self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_M:
-            if MAP_Z + 1 < MAP_X * MAP_Y:
-                MAP_Z += 1
-                self.mine_field.generate_map()
-                self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-                self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_Comma:
-            if MAP_Z - 1 > 0:
-                MAP_Z -= 1
-                self.mine_field.generate_map()
-                self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-                self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_Period:
-            if MAP_Z - 5 > 0:
-                MAP_Z -= 5
-                self.mine_field.generate_map()
-                self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-                self.show_message("New Game Ready")
-        elif event.key() == QtCore.Qt.Key.Key_T:
-            TRICK_MODE = not TRICK_MODE
-            if TRICK_MODE:
-                self.set_status("(Trick Mode On)")
+            if not self.cheat_mode:
+                self.init_mine_field()
             else:
-                self.set_status("(Trick Mode Off)")
-        elif event.key() == QtCore.Qt.Key.Key_S and TRICK_MODE:
-            REVEALED = not REVEALED
-            for i in range(len(MAP)):
-                MAP[i].reveal(REVEALED)
-        elif event.key() == QtCore.Qt.Key.Key_R and TRICK_MODE:
-            REVEALED_COUNT = 0
-            MARKED_COUNT = 0
-            for i in range(len(MAP)):
-                MAP[i].setChecked(False)
-                MAP[i].cover = SYMBOL_BLANK
-                self.mine_field.button_set_text(MAP[i], MAP[i].cover)
+                self.mine_field.reset_mine_field()
+                self.game_terminated = False
+        elif event.key() == QtCore.Qt.Key.Key_Q:
+            self.init_mine_field(9, 9, 10)
+        elif event.key() == QtCore.Qt.Key.Key_W:
+            self.init_mine_field(16, 16, 40)
+        elif event.key() == QtCore.Qt.Key.Key_E:
+            self.init_mine_field(30, 16, 99)
+
+        elif event.key() == QtCore.Qt.Key.Key_Y:
+            new_width = self.mine_field.field_width + 1
+            if modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier:
+                new_width = self.mine_field.field_width + 5
+            self.init_mine_field(field_width=new_width)
+        elif event.key() == QtCore.Qt.Key.Key_U:
+            new_width = self.mine_field.field_width - 1
+            if modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier:
+                new_width = self.mine_field.field_width - 5
+            self.init_mine_field(field_width=new_width)
+
+        elif event.key() == QtCore.Qt.Key.Key_H:
+            new_height = self.mine_field.field_height + 1
+            if modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier:
+                new_height = self.mine_field.field_height + 5
+            self.init_mine_field(field_height=new_height)
+        elif event.key() == QtCore.Qt.Key.Key_J:
+            new_height = self.mine_field.field_height - 1
+            if modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier:
+                new_height = self.mine_field.field_height - 5
+            self.init_mine_field(field_height=new_height)
+
+        elif event.key() == QtCore.Qt.Key.Key_N:
+            new_count = self.mine_field.mine_count + 1
+            if modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier:
+                new_count = self.mine_field.mine_count + 5
+            self.init_mine_field(mine_count=new_count)
+        elif event.key() == QtCore.Qt.Key.Key_M:
+            new_count = self.mine_field.mine_count - 1
+            if modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier:
+                new_count = self.mine_field.mine_count - 5
+            self.init_mine_field(mine_count=new_count)
+
+        elif event.key() == QtCore.Qt.Key.Key_T:
+            self.cheat_mode = not self.cheat_mode
+            print(f"CHEAT_MODE: {self.cheat_mode}")
+            for land in self.mine_field.land_list:
+                land.reveal(self.cheat_mode)
+
         elif event.key() == QtCore.Qt.Key.Key_A:
-            startTime = datetime.datetime.now()
-            AUTO_SOLVING = True
-            while AUTO_SOLVING and not GAME_TERMINATED:
-                AUTO_SOLVING = AI().solve()
-                self.update()
-            endTime = datetime.datetime.now()
-            print("Usage Time: " + str((endTime - startTime).seconds) + "." + str((endTime - startTime).microseconds))
-        elif event.key() == QtCore.Qt.Key.Key_F:
-            while AUTO_SOLVING:
-                self.mine_field.generate_map()
-                self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : )")
-                self.show_message("New Game Ready")
-                while AUTO_SOLVING and not GAME_TERMINATED:
-                    AUTO_SOLVING = AI().solve()
-                    self.update()
-        elif event.key() == QtCore.Qt.Key.Key_Z:
-            AI().solve()
-        elif event.key() == QtCore.Qt.Key.Key_X:
+            self.auto_click = not self.auto_click
+            print(f"AUTO_CLICK: {self.auto_click}")
+        elif event.key() == QtCore.Qt.Key.Key_S:
+            self.auto_random_click = not self.auto_random_click
+            print(f"AUTO_RAMDOM_CLICK: {self.auto_random_click}")
+
+        elif event.key() == QtCore.Qt.Key.Key_D:
             AI().random_click(1)
-        elif event.key() == QtCore.Qt.Key.Key_C:
-            AUTO_RANDOM_CLICK = not AUTO_RANDOM_CLICK   
+        elif event.key() == QtCore.Qt.Key.Key_F:
+            if not MainWindow().game_terminated:
+                AI().solve(auto_click=self.auto_click, auto_random_click=self.auto_random_click)
+        elif event.key() == QtCore.Qt.Key.Key_G:
+            if not MainWindow().game_terminated:
+                auto_solving = True
+                start_time = datetime.datetime.now()
+                while auto_solving and not self.game_terminated:
+                    auto_solving = AI().solve(auto_click=self.auto_click, auto_random_click=self.auto_random_click)
+                    # self.update()
+                end_time = datetime.datetime.now()
+                print(f"Usage Time: {(end_time - start_time).seconds}.{(end_time - start_time).microseconds}")
+
+        # elif event.key() == QtCore.Qt.Key.Key_0:
+        #     while AUTO_SOLVING:
+        #         self.mine_field.generate_mine()
+        #         self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MINE_COUNT) + " Mines" + " : )")
+        #         self.show_message("New Game Ready")
+        #         while AUTO_SOLVING and not GAME_TERMINATED:
+        #             AUTO_SOLVING = AI().solve()
+        #             self.update()
 
 
 def main():
-    app = QtWidgets.QApplication(sys.argv)
-    global ui
-    ui = UI()
+    # sys.argv += ['-platform', 'windows:darkmode=2']
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    MainWindow().show()
     sys.exit(app.exec())
 
 
-class AI(object):
+class AI:
+    condition_list = list()
+    next_id = -1
+    click_or_mark = 0
+
+    debug_print = False
+
     def __init__(self):
-        self.conditionList = []  # [land_id, mine_num, ...]
-        self.nextID = -1
-        self.clickOrMark = 0
-        self.debugFlag = False
+        pass
     
-    def solve(self):
-        global AUTO_RANDOM_CLICK
-        print("===AI===")
+    def solve(self, auto_click=False, auto_random_click=False):
+        mine_field = MainWindow().mine_field
         self.collect_condition()
-        if self.debugFlag:
-            for i in self.conditionList:
-                print(i)
-        print("Try to analyse ...")
-        if self.analyse_condition():
-            ui.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : D")
-            if self.debugFlag:
-                for i in self.conditionList:
-                    print(i)
+        # print("[AI]Try to analyse ...")
+        land, have_mine = self.analyse_condition()
+        if land is not None:
+            if auto_click:
+                if not have_mine:
+                    land.auto_left_click()
+                else:
+                    land.auto_mark()
+            else:
+                if not have_mine:
+                    print(f"[AI]({land.x}, {land.y}) is empty")
+                    MainWindow().show_message(f"({land.x}, {land.y}) is empty")
+                else:
+                    print(f"[AI]({land.x}, {land.y}) have mine")
+                    MainWindow().show_message(f"({land.x}, {land.y}) have mine")
+            MainWindow().setWindowTitle(
+                f"{mine_field.field_width} X {mine_field.field_height} with {mine_field.mine_count} Mines :D"
+            )
+            if self.debug_print:
+                for cond in self.condition_list:
+                    print({
+                        "land": cond["land"].to_string(),
+                        "possible_mine": cond["possible_mine"],
+                        "adj_land": [land.to_string() for land in cond["adj_land"]],
+                    })
             return True
         else:
-            print("No conclusion found.")
-            ui.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MAP_Z) + " Mines" + " : (")
-            if AUTO_RANDOM_CLICK:
-                self.random_click(1)
-                return True
+            MainWindow().setWindowTitle(
+                f"{mine_field.field_width} X {mine_field.field_height} with {mine_field.mine_count} Mines :(")
+            if auto_random_click:
+                return self.random_click(1)
             else:
+                print("[AI]No conclusion found.")
                 return False
     
     def collect_condition(self):
-        for i in MAP:
-            if i.isChecked() and i.mine_num != 0:
-                x, y = i.x, i.y
-                tmp_list = [x + MAP_X * y, i.mine_num]
-                # NW
-                if x - 1 >= 0 and y - 1 >= 0 and not MAP[(x - 1) + MAP_X * (y - 1)].isChecked() and MAP[(x - 1) + MAP_X * (y - 1)].cover != SYMBOL_FLAG:
-                    tmp_list.append((x - 1) + MAP_X * (y - 1))
-                # N
-                if y - 1 >= 0 and not MAP[x + MAP_X * (y - 1)].isChecked() and MAP[x + MAP_X * (y - 1)].cover != SYMBOL_FLAG:
-                    tmp_list.append(x + MAP_X * (y - 1))
-                # NE
-                if x + 1 < MAP_X and y - 1 >= 0 and not MAP[(x + 1) + MAP_X * (y - 1)].isChecked() and MAP[(x + 1) + MAP_X * (y - 1)].cover != SYMBOL_FLAG:
-                    tmp_list.append((x + 1) + MAP_X * (y - 1))
-                # W
-                if x - 1 >= 0 and not MAP[(x - 1) + MAP_X * y].isChecked() and MAP[(x - 1) + MAP_X * y].cover != SYMBOL_FLAG:
-                    tmp_list.append((x - 1) + MAP_X * y)
-                # E
-                if x + 1 < MAP_X and not MAP[(x + 1) + MAP_X * y].isChecked() and MAP[(x + 1) + MAP_X * y].cover != SYMBOL_FLAG:
-                    tmp_list.append((x + 1) + MAP_X * y)
-                # SW
-                if x - 1 >= 0 and y + 1 <MAP_Y and not MAP[(x - 1) + MAP_X * (y + 1)].isChecked() and MAP[(x - 1) + MAP_X * (y + 1)].cover != SYMBOL_FLAG:
-                    tmp_list.append((x - 1) + MAP_X * (y + 1))
-                # S
-                if y + 1 < MAP_Y and not MAP[x + MAP_X * (y + 1)].isChecked() and MAP[x+ MAP_X * (y + 1)].cover != SYMBOL_FLAG:
-                    tmp_list.append(x + MAP_X * (y + 1))
-                # SE
-                if x + 1 < MAP_X and y + 1 < MAP_Y and not MAP[(x + 1) + MAP_X * (y + 1)].isChecked() and MAP[(x + 1) + MAP_X * (y + 1)].cover != SYMBOL_FLAG:
-                    tmp_list.append((x + 1) + MAP_X * (y + 1))
-                flag_num = 0
-                # NW
-                if x - 1 >= 0 and y - 1 >= 0 and not MAP[(x - 1) + MAP_X * (y - 1)].isChecked() and MAP[(x - 1) + MAP_X * (y - 1)].cover == SYMBOL_FLAG:
-                    flag_num += 1
-                # N
-                if y - 1 >= 0 and not MAP[x + MAP_X * (y - 1)].isChecked() and MAP[x + MAP_X * (y - 1)].cover == SYMBOL_FLAG:
-                    flag_num += 1
-                # NE
-                if x + 1 < MAP_X and y - 1 >= 0 and not MAP[(x + 1) + MAP_X * (y - 1)].isChecked() and MAP[(x + 1) + MAP_X * (y -1)].cover == SYMBOL_FLAG:
-                    flag_num += 1
-                # W
-                if x - 1 >= 0 and not MAP[(x - 1) + MAP_X * y].isChecked() and MAP[(x - 1) + MAP_X * y].cover == SYMBOL_FLAG:
-                    flag_num += 1
-                # E
-                if x + 1 < MAP_X and not MAP[(x + 1) + MAP_X * y].isChecked() and MAP[(x + 1) + MAP_X * y].cover == SYMBOL_FLAG:
-                    flag_num += 1
-                # SW
-                if x - 1 >= 0 and y + 1 <MAP_Y and not MAP[(x - 1) + MAP_X * (y + 1)].isChecked() and MAP[(x - 1) + MAP_X * (y + 1)].cover == SYMBOL_FLAG:
-                    flag_num += 1
-                # S
-                if y + 1 < MAP_Y and not MAP[x + MAP_X * (y + 1)].isChecked() and MAP[x + MAP_X * (y + 1)].cover == SYMBOL_FLAG:
-                    flag_num += 1
-                # SE
-                if x + 1 < MAP_X and y + 1 < MAP_Y and not MAP[(x + 1) + MAP_X * (y + 1)].isChecked() and MAP[(x + 1) + MAP_X * (y + 1)].cover == SYMBOL_FLAG:
-                    flag_num += 1
-                tmp_list[1] = i.mine_num - flag_num
-                if tmp_list[1] != 0 or len(tmp_list) - 2 != 0:
-                    self.conditionList.append(tmp_list)
+        mine_field = MainWindow().mine_field
+        self.condition_list = list()
+        for land in mine_field.land_list:
+            if land.isChecked() and land.adjacent_mine_count != 0:
+                x, y = land.x, land.y
+                condition = {
+                    "land": land,
+                    "possible_mine": land.adjacent_mine_count,
+                    "adj_land": list()
+                }
+                for _x, _y in itertools.product([-1, 0, 1], [-1, 0, 1]):
+                    if _x == 0 and _y == 0:
+                        continue
+                    if 0 <= x + _x < mine_field.field_width and 0 <= y + _y < mine_field.field_height:
+                        adj_land = mine_field.land_list[(x + _x) + mine_field.field_width * (y + _y)]
+                        if not adj_land.isChecked():
+                            if adj_land.cover != SYMBOL_FLAG:
+                                condition["adj_land"].append(adj_land)
+                            else:
+                                condition["possible_mine"] -= 1
+
+                if condition["possible_mine"] > 0 or len(condition["adj_land"]) > 0:
+                    self.condition_list.append(condition)
+
+        if self.debug_print:
+            for cond in self.condition_list:
+                print({
+                    "land": cond["land"].to_string(),
+                    "possible_mine": cond["possible_mine"],
+                    "adj_land": [land.to_string() for land in cond["adj_land"]],
+                })
 
     @staticmethod
     def random_click(num):
-        print("Random Click")
+        print("[AI]Random Click")
+        mine_field = MainWindow().mine_field
+        land_list = [land for land in mine_field.land_list if not land.isChecked() and land.cover == SYMBOL_BLANK]
+        if len(land_list) == 0:
+            return False
         i = 0
         while i < num:
-            k = randint(0, MAP_X * MAP_Y -1)
-            if not MAP[k].isChecked() and not MAP[k].cover == SYMBOL_FLAG:
-                MAP[k].auto_left_click()
-                i += 1
+            x = randint(0, len(land_list) - 1)
+            land_list[x].auto_left_click()
+            del land_list[x]
+            i += 1
+        return True
     
     def analyse_condition(self):
-        flag = False
         while True:
-            for i in range(len(self.conditionList)):
-                if self.conditionList[i][1] == 0:
-                    for k in self.conditionList[i][2:]:
-                        if MAP[k].cover != SYMBOL_FLAG:
-                            if AUTO_SOLVING:
-                                MAP[k].auto_left_click()
-                            else:
-                                ui.show_message(str(k) + " is empty")
-                            flag = True
-                            break
-                elif self.conditionList[i][1] == len(self.conditionList[i]) - 2:
-                    for k in range(2, len(self.conditionList[i])):
-                        if AUTO_SOLVING:
-                            MAP[self.conditionList[i][k]].auto_mark()
-                        else:
-                            ui.show_message(str(self.conditionList[i][k]) + " have mine")
-                        flag = True
-                        break
-                if flag: break
-            if flag: break
-            for i in range(len(self.conditionList) - 1):
-                for j in range(i + 1, len(self.conditionList)):
-                    if self.conditionList[i][1] == self.conditionList[j][1] and len(self.conditionList[i]) != len(self.conditionList[j]) and self.is_include(self.conditionList[i], self.conditionList[j]):
-                        tmp_list = self.sub(self.conditionList[i], self.conditionList[j])
-                        # for k in tmp_list:
-                        #     MAP[k].auto_left_click()
-                        if AUTO_SOLVING:
-                            MAP[tmp_list[0]].auto_left_click()
-                        else:
-                            ui.show_message(str(tmp_list[0]) + " is empty.")
-                        flag = True
-                    elif self.conditionList[i][1] != self.conditionList[j][1] and abs(self.conditionList[i][1] - self.conditionList[j][1]) == abs(len(self.conditionList[i]) - len(self.conditionList[j])) and self.is_include(self.conditionList[i], self.conditionList[j]):
-                        # if self.conditionList[i][1] > self.conditionList[j][1]:
-                        #     tmp_list = self.conditionList[j][2:]
-                        # else:
-                        #     tmp_list = self.conditionList[i][2:]
-                        tmp_list = self.sub(self.conditionList[i], self.conditionList[j])
-                        # for k in tmp_list:
-                        #     MAP[k].auto_mark()
-                        if AUTO_SOLVING:
-                            MAP[tmp_list[0]].auto_mark()
-                        else:
-                            ui.show_message(str(tmp_list[0]) + " have mine.")
-                        flag = True
-                    if flag:
-                        break
-                if flag:
-                    break
+            for condition in self.condition_list:
+                if condition["possible_mine"] == 0:
+                    return condition["adj_land"][0], False
+
+                elif condition["possible_mine"] == len(condition["adj_land"]):
+                    return condition["adj_land"][0], True
+
+            for cond_a,cond_b in itertools.product(self.condition_list, self.condition_list):
+                if cond_a["land"].id >= cond_b["land"].id:
+                    continue
+                if cond_a["possible_mine"] == cond_b["possible_mine"] \
+                        and len(cond_a["adj_land"]) != len(cond_b["adj_land"]) \
+                        and self.is_include(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id):
+                    empty_land = self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id)[0]
+                    return empty_land, False
+
+                elif cond_a["possible_mine"] != cond_b["possible_mine"] \
+                        and abs(cond_a["possible_mine"] - cond_b["possible_mine"]) \
+                        == abs(len(cond_a["adj_land"]) - len(cond_b["adj_land"])) \
+                        and self.is_include(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id):
+                    mine_land = self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id)[0]
+                    return mine_land, True
             break
-        return flag
+        return None, None
 
     @staticmethod
-    def is_include(a, b):
+    def is_include(a, b, func):
         if len(a) < len(b):
             tmp = a
             a = b
             b = tmp
-        i, j, k = 2, 2, 0
+        i, j, k = 0, 0, 0
         while i < len(a) and j < len(b):
-            if a[i] == b[j]:
+            if func(a[i]) == func(b[j]):
                 i += 1
                 j += 1
                 k += 1
-            elif a[i] < b[j]:
+            elif func(a[i]) < func(b[j]):
                 i += 1
-            else:   # a[i] > b[j]
+            else:
                 j += 1
-        return k == len(b) - 2
+        return k == len(b)
 
     @staticmethod
-    def sub(a, b):
+    def sub(a, b, func):
         i, j = 0, 0
-        c, d = a[2:], b[2:]
-        while i < len(c) and j < len(d):
-            if c[i] == d[j]:
-                c.remove(c[i])
-                d.remove(d[j])
-            elif c[i] < d[j]:
+        _a, _b = a[:], b[:]
+        while i < len(_a) and j < len(_b):
+            __a, __b = func(_a[i]), func(_b[j])
+            if __a == __b:
+                _a.remove(_a[i])
+                _b.remove(_b[j])
+            elif __a < __b:
                 i += 1
-            else:   # c[i] > d[j]
+            else:
                 j += 1
-        if len(c) != 0:
-            tmp_list = c
+        if len(_a) != 0:
+            return _a
         else:
-            tmp_list = d
-        return tmp_list
+            return _b
 
 
 if __name__ == '__main__':
