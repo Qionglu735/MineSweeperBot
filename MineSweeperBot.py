@@ -46,9 +46,13 @@ class Land(QPushButton):
             font: "Roman Times";
             font-size: 10;
             font-weight: bold;
+            background-color: #434343;
         }
         QPushButton:pressed {
             border: 2px solid #a02020;
+        }
+        QPushButton:checked {
+            background-color: #232323;
         }
     """
     focus_style_sheet = """
@@ -58,10 +62,14 @@ class Land(QPushButton):
             font-size: 10;
             font-weight: bold;
             border: 2px solid #a02020;
+            background-color: #434343;
         }
         QPushButton:pressed {
             border: 2px solid #a02020;
-        }asg
+        }
+        QPushButton:checked {
+            background-color: #232323;
+        }
     """
 
     def __init__(self, parent, x, y):
@@ -78,7 +86,7 @@ class Land(QPushButton):
         self.setCheckable(True)
         self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
     
-    def left_click(self):
+    def left_click(self, chain=False):
 
         mine_field = self.parent()
 
@@ -91,7 +99,7 @@ class Land(QPushButton):
             else:
                 self.setChecked(True)
         if self.isChecked():
-            print(f"Left Click ({self.x}, {self.y})")
+            print(f"Click ({self.x}, {self.y})")
             if len([x for x in mine_field.land_list if x.have_mine is True]) == 0:
                 mine_field.generate_mine(self.x, self.y)
             self.parent().check_end_game(self.x, self.y)
@@ -103,7 +111,7 @@ class Land(QPushButton):
                         if 0 <= self.x + _x < field_width and 0 <= self.y + _y < field_height:
                             land = self.parent().land_list[(self.x + _x) + field_width * (self.y + _y)]
                             if not land.isChecked():
-                                land.left_click()
+                                land.left_click(chain=True)
                 self.parent().check_end_game(self.x, self.y)
             self.update_ui()
         else:
@@ -126,21 +134,22 @@ class Land(QPushButton):
                         if 0 <= self.x + x < field_width and 0 <= self.y + y < field_height:
                             land = self.parent().land_list[(self.x + x) + field_width * (self.y + y)]
                             if not land.isChecked() and land.cover != SYMBOL_FLAG:
-                                land.left_click()
-            self.update_ui()
+                                land.left_click(chain=True)
+            if not chain:
+                self.update_ui()
 
         if not MainWindow().game_terminated:
             mine_field = self.parent()
             MainWindow().show_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
 
     def auto_left_click(self):
-        print(f"Auto Left Click ({self.x}, {self.y})")
+        print(f"Auto Click")
         self.setChecked(True)
         self.left_click()
     
     def right_click(self):
         if not MainWindow().game_terminated:
-            print(f"Right Click ({self.x}, {self.y})")
+            print(f"Mark  ({self.x}, {self.y})")
             if not self.isChecked():
                 if self.cover == SYMBOL_BLANK:
                     self.cover = SYMBOL_FLAG
@@ -156,7 +165,7 @@ class Land(QPushButton):
         self.update_ui()
     
     def auto_mark(self):
-        print(f"Auto Mark ({self.x}, {self.y})")
+        print(f"Auto Mark")
         while not MainWindow().game_terminated and self.cover != SYMBOL_FLAG:
             self.right_click()
     
@@ -458,6 +467,8 @@ class MainWindow(QMainWindow):
                 start_time = datetime.datetime.now()
                 while auto_solving and not self.game_terminated:
                     auto_solving = AI().solve(auto_click=self.auto_click, auto_random_click=self.auto_random_click)
+                    if not self.auto_click:
+                        break
                     # self.update()
                 end_time = datetime.datetime.now()
                 print(f"Usage Time: {(end_time - start_time).seconds}.{(end_time - start_time).microseconds}")
@@ -482,8 +493,6 @@ def main():
 
 class AI:
     condition_list = list()
-    next_id = -1
-    click_or_mark = 0
 
     debug_print = False
 
@@ -585,21 +594,22 @@ class AI:
                 elif condition["possible_mine"] == len(condition["adj_land"]):
                     return condition["adj_land"][0], True
 
-            for cond_a,cond_b in itertools.product(self.condition_list, self.condition_list):
+            condition_updated = False
+            for cond_a, cond_b in itertools.product(self.condition_list, self.condition_list):
                 if cond_a["land"].id >= cond_b["land"].id:
                     continue
-                if cond_a["possible_mine"] == cond_b["possible_mine"] \
-                        and len(cond_a["adj_land"]) != len(cond_b["adj_land"]) \
-                        and self.is_include(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id):
-                    empty_land = self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id)[0]
-                    return empty_land, False
+                if cond_a["possible_mine"] == cond_b["possible_mine"]:
+                    if len(cond_a["adj_land"]) != len(cond_b["adj_land"]) \
+                            and self.is_include(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id):
+                        empty_land = self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id)[0][0]
+                        return empty_land, False
 
-                elif cond_a["possible_mine"] != cond_b["possible_mine"] \
-                        and abs(cond_a["possible_mine"] - cond_b["possible_mine"]) \
-                        == abs(len(cond_a["adj_land"]) - len(cond_b["adj_land"])) \
-                        and self.is_include(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id):
-                    mine_land = self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id)[0]
-                    return mine_land, True
+                else:
+                    if abs(cond_a["possible_mine"] - cond_b["possible_mine"]) \
+                            == abs(len(cond_a["adj_land"]) - len(cond_b["adj_land"])) \
+                            and self.is_include(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id):
+                        mine_land = self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id)[0][0]
+                        return mine_land, True
             break
         return None, None
 
@@ -635,9 +645,9 @@ class AI:
             else:
                 j += 1
         if len(_a) != 0:
-            return _a
+            return _a, _a, list()
         else:
-            return _b
+            return _b, list(), _b
 
 
 if __name__ == '__main__':
