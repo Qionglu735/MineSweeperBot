@@ -1,7 +1,8 @@
 
 from random import randint
-from PySide6 import QtGui, QtCore
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget,  QGridLayout, QPushButton
+from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal
 
 import datetime
 import itertools
@@ -84,7 +85,7 @@ class Land(QPushButton):
         self.setStyleSheet(self.style_sheet.replace("FONT_COLOR", "white"))
         
         self.setCheckable(True)
-        self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
     
     def left_click(self, chain=False):
         mine_field = self.parent()
@@ -126,9 +127,9 @@ class Land(QPushButton):
             self.update_ui(focus=True)
 
         if not MainWindow().game_terminated:
-            MainWindow().show_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
+            MainWindow().set_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
 
-    def auto_left_click(self):
+    def auto_click(self):
         # print(f"Auto Click")
         self.left_click()
     
@@ -143,7 +144,7 @@ class Land(QPushButton):
                 elif self.cover == SYMBOL_UNKNOWN:
                     self.cover = SYMBOL_BLANK
             mine_field = self.parent()
-            MainWindow().show_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
+            MainWindow().set_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
         self.update_ui(focus=True)
     
     def auto_mark(self):
@@ -230,6 +231,7 @@ class MineField(QWidget):
     def reset_mine_field(self):
         for land in self.land_list:
             land.cover = SYMBOL_BLANK
+            land.checked = False
             land.update_ui()
 
     def generate_mine(self, safe_x=-9, safe_y=-9):
@@ -282,14 +284,14 @@ class MineField(QWidget):
     def check_end_game(self, x, y):
         if self.land_list[x + self.field_width * y].have_mine:
             MainWindow().game_terminated = True
-            self.parent().show_message("YOU FAILED")
+            self.parent().set_message("YOU FAILED")
             for land in self.land_list:
                 if land.have_mine:
                     land.cover = SYMBOL_MINE
                     land.update_ui()
         elif self.revealed_land_count() == self.field_width * self.field_height - self.mine_count:
             MainWindow().game_terminated = True
-            self.parent().show_message("YOU WIN")
+            self.parent().set_message("YOU WIN")
             for y in range(self.field_height):
                 for x in range(self.field_width):
                     if self.land_list[x + self.field_width * y].have_mine:
@@ -319,20 +321,32 @@ class MainWindow(QMainWindow):
     game_terminated = False
 
     cheat_mode = False
-    auto_click = False
-    auto_random_click = False
 
+    emote = ""
     status = ""
+
+    ai = None
+    ai_start_time = None
 
     def __init__(self):
         super().__init__()
         self.init_ui()
-     
+
+        self.threadpool = QThreadPool()
+        self.threadpool.setMaxThreadCount(1)
+        self.ai = AI()
+        self.ai.result.click.connect(self.ai_click)
+        self.ai.result.mark.connect(self.ai_mark)
+        self.ai.result.emote.connect(self.set_emote)
+        self.ai.result.message.connect(self.set_message)
+        self.ai.result.ai_finished.connect(self.ai_finished)
+
     def init_ui(self):
-        # self.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint)
+        self.setWindowFlags(Qt.WindowType.WindowMinimizeButtonHint
+                            | Qt.WindowType.WindowCloseButtonHint)
         self.move(900, 1800)
-        icon = QtGui.QIcon()
-        icon.addPixmap(QtGui.QPixmap("Mine.ico"))
+        icon = QIcon()
+        icon.addPixmap(QPixmap("Mine.ico"))
         self.setWindowIcon(icon)
 
         self.init_mine_field()
@@ -354,19 +368,27 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(self.mine_field)
         self.adjustSize()
+        self.update_title()
+        self.set_message("New Game Ready")
+
+    def update_title(self):
         self.setWindowTitle(
             f"{self.mine_field.field_width} "
             f"X {self.mine_field.field_height} "
-            f"with {self.mine_field.mine_count} Mines :)"
+            f"with {self.mine_field.mine_count} Mines "
+            f"{self.emote}"
         )
-        self.show_message("New Game Ready")
-    
-    def show_message(self, msg):
-        self.statusBar().showMessage(self.status + msg)
-    
-    def set_status(self, status):
-        self.status = status
+
+    def update_status(self):
         self.statusBar().showMessage(self.status)
+
+    def set_emote(self, emote):
+        self.emote = emote
+        self.update_title()
+    
+    def set_message(self, msg):
+        self.status = msg
+        self.update_status()
     
     def keyPressEvent(self, event):
         # if event.key() < 256:
@@ -376,92 +398,101 @@ class MainWindow(QMainWindow):
 
         modifiers = QApplication.keyboardModifiers()
         
-        if event.key() == QtCore.Qt.Key.Key_Escape:
+        if event.key() == Qt.Key.Key_Escape:
             self.close()
-        elif event.key() == QtCore.Qt.Key.Key_R:
+        elif event.key() == Qt.Key.Key_R:
             if not self.cheat_mode:
                 self.init_mine_field()
             else:
                 self.mine_field.reset_mine_field()
                 self.game_terminated = False
-        elif event.key() == QtCore.Qt.Key.Key_Q:
+        elif event.key() == Qt.Key.Key_Q:
             self.init_mine_field(9, 9, 10)
-        elif event.key() == QtCore.Qt.Key.Key_W:
+        elif event.key() == Qt.Key.Key_W:
             self.init_mine_field(16, 16, 40)
-        elif event.key() == QtCore.Qt.Key.Key_E:
+        elif event.key() == Qt.Key.Key_E:
             self.init_mine_field(30, 16, 99)
 
-        elif event.key() == QtCore.Qt.Key.Key_Y:
+        elif event.key() == Qt.Key.Key_Y:
             new_width = self.mine_field.field_width + 1
-            if modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier:
+            if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_width = self.mine_field.field_width + 5
             self.init_mine_field(field_width=new_width)
-        elif event.key() == QtCore.Qt.Key.Key_U:
+        elif event.key() == Qt.Key.Key_U:
             new_width = self.mine_field.field_width - 1
-            if modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier:
+            if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_width = self.mine_field.field_width - 5
             self.init_mine_field(field_width=new_width)
 
-        elif event.key() == QtCore.Qt.Key.Key_H:
+        elif event.key() == Qt.Key.Key_H:
             new_height = self.mine_field.field_height + 1
-            if modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier:
+            if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_height = self.mine_field.field_height + 5
             self.init_mine_field(field_height=new_height)
-        elif event.key() == QtCore.Qt.Key.Key_J:
+        elif event.key() == Qt.Key.Key_J:
             new_height = self.mine_field.field_height - 1
-            if modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier:
+            if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_height = self.mine_field.field_height - 5
             self.init_mine_field(field_height=new_height)
 
-        elif event.key() == QtCore.Qt.Key.Key_N:
+        elif event.key() == Qt.Key.Key_N:
             new_count = self.mine_field.mine_count + 1
-            if modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier:
+            if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_count = self.mine_field.mine_count + 5
             self.init_mine_field(mine_count=new_count)
-        elif event.key() == QtCore.Qt.Key.Key_M:
+        elif event.key() == Qt.Key.Key_M:
             new_count = self.mine_field.mine_count - 1
-            if modifiers == QtCore.Qt.KeyboardModifier.ShiftModifier:
+            if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_count = self.mine_field.mine_count - 5
             self.init_mine_field(mine_count=new_count)
 
-        elif event.key() == QtCore.Qt.Key.Key_T:
+        elif event.key() == Qt.Key.Key_T:
             self.cheat_mode = not self.cheat_mode
             print(f"CHEAT_MODE: {self.cheat_mode}")
             for land in self.mine_field.land_list:
                 land.reveal(self.cheat_mode)
 
-        elif event.key() == QtCore.Qt.Key.Key_A:
-            self.auto_click = not self.auto_click
-            print(f"AUTO_CLICK: {self.auto_click}")
-        elif event.key() == QtCore.Qt.Key.Key_S:
-            self.auto_random_click = not self.auto_random_click
-            print(f"AUTO_RAMDOM_CLICK: {self.auto_random_click}")
+        elif event.key() == Qt.Key.Key_A:
+            self.ai.auto_click = not self.ai.auto_click
+            print(f"AUTO_CLICK: {self.ai.auto_click}")
+        elif event.key() == Qt.Key.Key_S:
+            self.ai.auto_random_click = not self.ai.auto_random_click
+            print(f"AUTO_RAMDOM_CLICK: {self.ai.auto_random_click}")
 
-        elif event.key() == QtCore.Qt.Key.Key_D:
-            AI().random_click(1)
-        elif event.key() == QtCore.Qt.Key.Key_F:
+        elif event.key() == Qt.Key.Key_D:
             if not MainWindow().game_terminated:
-                AI().solve(auto_click=self.auto_click, auto_random_click=self.auto_random_click)
-        elif event.key() == QtCore.Qt.Key.Key_G:
+                self.ai.random_click()
+        elif event.key() == Qt.Key.Key_F:
             if not MainWindow().game_terminated:
-                auto_solving = True
-                start_time = datetime.datetime.now()
-                while auto_solving and not self.game_terminated:
-                    auto_solving = AI().solve(auto_click=self.auto_click, auto_random_click=self.auto_random_click)
-                    if not self.auto_click:
-                        break
-                    # self.update()
-                end_time = datetime.datetime.now()
-                print(f"Usage Time: {(end_time - start_time).seconds}.{(end_time - start_time).microseconds}")
+                self.ai_start_time = datetime.datetime.now()
+                self.ai.auto_step = 1
+                self.threadpool.start(self.ai)
+        elif event.key() == Qt.Key.Key_G:
+            if not MainWindow().game_terminated:
+                self.ai_start_time = datetime.datetime.now()
+                self.ai.auto_step = -1
+                self.threadpool.start(self.ai)
 
-        # elif event.key() == QtCore.Qt.Key.Key_0:
+        # elif event.key() == Qt.Key.Key_0:
         #     while AUTO_SOLVING:
         #         self.mine_field.generate_mine()
         #         self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MINE_COUNT) + " Mines" + " : )")
-        #         self.show_message("New Game Ready")
+        #         self.set_message("New Game Ready")
         #         while AUTO_SOLVING and not GAME_TERMINATED:
         #             AUTO_SOLVING = AI().solve()
         #             self.update()
+
+    def ai_click(self, land):
+        land.auto_click()
+        self.ai.result.game_update_completed.emit()
+
+    def ai_mark(self, land):
+        land.auto_mark()
+        self.ai.result.game_update_completed.emit()
+
+    def ai_finished(self):
+        time_delta = datetime.datetime.now() - self.ai_start_time
+        print(f"Usage Time: {time_delta.seconds}.{time_delta.microseconds}")
 
 
 def main():
@@ -472,35 +503,78 @@ def main():
     sys.exit(app.exec())
 
 
-class AI:
+class AI(QRunnable):
+    class Result(QObject):
+        click = Signal(object)
+        mark = Signal(object)
+        emote = Signal(str)
+        message = Signal(str)
+
+        game_update_completed = Signal()
+        game_terminated = Signal()
+        ai_finished = Signal()
+
+    auto_click = False
+    auto_random_click = False
+    auto_step = -1
+    game_updating = False
+
+    auto_solving = False
     condition_list = list()
+    result = None
 
     debug_print = False
 
     def __init__(self):
-        pass
-    
-    def solve(self, auto_click=False, auto_random_click=False):
-        mine_field = MainWindow().mine_field
+        super().__init__()
+        self.setAutoDelete(False)
+        self.result = AI.Result()
+        self.result.game_update_completed.connect(self.game_update_completed)
+
+    def game_update_completed(self):
+        if MainWindow().game_terminated:
+            self.auto_solving = False
+        self.game_updating = False
+
+    @Slot()
+    def run(self):
+        self.auto_solving = True
+        self.game_updating = False
+        while self.auto_solving and self.auto_step != 0:
+            self.game_updating = True
+            self.auto_solving = self.solve()
+            if self.auto_step > 0:
+                self.auto_step -= 1
+            while self.auto_solving and self.auto_step != 0 and self.game_updating:
+                # wait until game update completed
+                pass
+        self.result.ai_finished.emit()
+
+    def solve(self):
         self.collect_condition()
         # print("[AI]Try to analyse ...")
+        if len(self.condition_list) == 0:
+            self.result.emote.emit(":(")
+            if self.auto_click:
+                return self.random_click()
+            else:
+                print("[AI] No conclusion found.")
+                return False
         land, have_mine = self.analyse_condition()
         if land is not None:
-            if auto_click:
+            if self.auto_click:
                 if not have_mine:
-                    land.auto_left_click()
+                    self.result.click.emit(land)
                 else:
-                    land.auto_mark()
+                    self.result.mark.emit(land)
             else:
                 if not have_mine:
-                    print(f"[AI]({land.x}, {land.y}) is empty")
-                    MainWindow().show_message(f"({land.x}, {land.y}) is empty")
+                    print(f"[AI] ({land.x}, {land.y}) is empty")
+                    self.result.message.emit(f"({land.x}, {land.y}) is empty")
                 else:
-                    print(f"[AI]({land.x}, {land.y}) have mine")
-                    MainWindow().show_message(f"({land.x}, {land.y}) have mine")
-            MainWindow().setWindowTitle(
-                f"{mine_field.field_width} X {mine_field.field_height} with {mine_field.mine_count} Mines :D"
-            )
+                    print(f"[AI] ({land.x}, {land.y}) have mine")
+                    self.result.message.emit(f"({land.x}, {land.y}) have mine")
+            self.result.emote.emit(":D")
             if self.debug_print:
                 for cond in self.condition_list:
                     print({
@@ -510,12 +584,11 @@ class AI:
                     })
             return True
         else:
-            MainWindow().setWindowTitle(
-                f"{mine_field.field_width} X {mine_field.field_height} with {mine_field.mine_count} Mines :(")
-            if auto_random_click:
-                return self.random_click(1)
+            self.result.emote.emit(":(")
+            if self.auto_random_click:
+                return self.random_click()
             else:
-                print("[AI]No conclusion found.")
+                print("[AI] No conclusion found.")
                 return False
     
     def collect_condition(self):
@@ -551,19 +624,14 @@ class AI:
                     "adj_land": [land.to_string() for land in cond["adj_land"]],
                 })
 
-    @staticmethod
-    def random_click(num):
+    def random_click(self):
         print("[AI]Random Click")
         mine_field = MainWindow().mine_field
         land_list = [land for land in mine_field.land_list if not land.checked and land.cover == SYMBOL_BLANK]
         if len(land_list) == 0:
             return False
-        i = 0
-        while i < num:
-            x = randint(0, len(land_list) - 1)
-            land_list[x].auto_left_click()
-            del land_list[x]
-            i += 1
+        x = randint(0, len(land_list) - 1)
+        self.result.click.emit(land_list[x])
         return True
     
     def analyse_condition(self):
