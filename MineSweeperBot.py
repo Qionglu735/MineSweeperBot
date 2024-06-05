@@ -1,16 +1,13 @@
 
-from random import randint
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget,  QGridLayout, QPushButton
 from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal
+from random import randint
 
 import datetime
 import itertools
 import sys
-
-MAP_X = 9
-MAP_Y = 9
-MINE_COUNT = 10
+import time
 
 SYMBOL_BLANK = " "
 SYMBOL_MINE = "X"
@@ -74,18 +71,19 @@ class Land(QPushButton):
     """
 
     def __init__(self, parent, x, y):
-        super().__init__(text=SYMBOL_BLANK)
+        super().__init__(parent, text=SYMBOL_BLANK)
 
         self.x, self.y = x, y
         self.id = x + parent.field_width * y
         
         self.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
-        self.setToolTip(str(x + MAP_X * y) + "(" + str(x) + ", " + str(y) + ")")
 
         self.setStyleSheet(self.style_sheet.replace("FONT_COLOR", "white"))
         
         self.setCheckable(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+        self.update_tooltip()
     
     def left_click(self, chain=False):
         mine_field = self.parent()
@@ -152,12 +150,12 @@ class Land(QPushButton):
         while not MainWindow().game_terminated and self.cover != SYMBOL_FLAG:
             self.right_click()
     
-    def reveal(self, flag):
-        if self.have_mine:
-            if flag:
-                self.setToolTip(f"! {self.x + MAP_X * self.y}({self.x}, {self.y}) !")
-            else:
-                self.setToolTip(f"{self.x + MAP_X * self.y}({self.x}, {self.y})")
+    def update_tooltip(self, cheat_mode=False):
+        mine_field = self.parent()
+        if self.have_mine and cheat_mode:
+            self.setToolTip(f"! ({self.x + 1}, {self.y + 1}) {self.x + mine_field.field_width * self.y + 1} !")
+        else:
+            self.setToolTip(f"({self.x + 1}, {self.y + 1}) {self.x + mine_field.field_width * self.y + 1}")
 
     def update_ui(self, focus=False):
         style_sheet = self.focus_style_sheet if focus else self.style_sheet
@@ -190,7 +188,7 @@ class Land(QPushButton):
         self.setStyleSheet(style_sheet)
 
         if focus:
-            for land in MainWindow().mine_field.land_list:
+            for land in self.parent().land_list:
                 if land == self:
                     continue
                 land.update_ui()
@@ -206,10 +204,10 @@ class MineField(QWidget):
 
     land_list = list()
 
-    def __init__(self, field_width=MAP_X, field_height=MAP_Y, mine_count=MINE_COUNT):
-        super().__init__()
+    def __init__(self, parent, field_width=9, field_height=9, mine_count=10):
+        super().__init__(parent)
         self.field_width = min(max(9, field_width), 1000)
-        self.field_height = min(max(9, field_height), 1000)
+        self.field_height = min(max(3, field_height), 1000)
         self.mine_count = min(max(1, mine_count), self.field_width * self.field_height - 9)
         self.init_mine_field()
     
@@ -319,21 +317,21 @@ def singleton(cls):
 class MainWindow(QMainWindow):
     mine_field = None
     game_terminated = False
-
     cheat_mode = False
+    looping = False
 
     emote = ""
     status = ""
 
     ai = None
+    ai_looper = None
+    ai_pool = None
     ai_start_time = None
 
     def __init__(self):
         super().__init__()
         self.init_ui()
 
-        self.threadpool = QThreadPool()
-        self.threadpool.setMaxThreadCount(1)
         self.ai = AI()
         self.ai.result.click.connect(self.ai_click)
         self.ai.result.mark.connect(self.ai_mark)
@@ -341,10 +339,16 @@ class MainWindow(QMainWindow):
         self.ai.result.message.connect(self.set_message)
         self.ai.result.ai_finished.connect(self.ai_finished)
 
+        self.ai_looper = AILooper()
+        self.ai_looper.status.init_map.connect(self.init_mine_field)
+        self.ai_looper.status.start_ai.connect(self.start_ai)
+
+        self.ai_pool = QThreadPool()
+        self.ai_pool.setMaxThreadCount(20)
+
     def init_ui(self):
-        self.setWindowFlags(Qt.WindowType.WindowMinimizeButtonHint
-                            | Qt.WindowType.WindowCloseButtonHint)
-        self.move(900, 1800)
+        self.setWindowFlags(Qt.WindowType.WindowMinimizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
+        self.move(700, 1700)
         icon = QIcon()
         icon.addPixmap(QPixmap("Mine.ico"))
         self.setWindowIcon(icon)
@@ -363,13 +367,16 @@ class MainWindow(QMainWindow):
         if mine_count > 0:
             field_size["mine_count"] = mine_count
 
-        self.mine_field = MineField(**field_size)
+        self.mine_field = MineField(self, **field_size)
         self.game_terminated = False
 
         self.setCentralWidget(self.mine_field)
         self.adjustSize()
         self.update_title()
         self.set_message("New Game Ready")
+
+        if self.looping:
+            self.ai_looper.status.map_ready.emit()
 
     def update_title(self):
         self.setWindowTitle(
@@ -406,6 +413,7 @@ class MainWindow(QMainWindow):
             else:
                 self.mine_field.reset_mine_field()
                 self.game_terminated = False
+
         elif event.key() == Qt.Key.Key_Q:
             self.init_mine_field(9, 9, 10)
         elif event.key() == Qt.Key.Key_W:
@@ -413,34 +421,34 @@ class MainWindow(QMainWindow):
         elif event.key() == Qt.Key.Key_E:
             self.init_mine_field(30, 16, 99)
 
-        elif event.key() == Qt.Key.Key_Y:
+        elif event.key() == Qt.Key.Key_U:
             new_width = self.mine_field.field_width + 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_width = self.mine_field.field_width + 5
             self.init_mine_field(field_width=new_width)
-        elif event.key() == Qt.Key.Key_U:
+        elif event.key() == Qt.Key.Key_I:
             new_width = self.mine_field.field_width - 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_width = self.mine_field.field_width - 5
             self.init_mine_field(field_width=new_width)
 
-        elif event.key() == Qt.Key.Key_H:
+        elif event.key() == Qt.Key.Key_J:
             new_height = self.mine_field.field_height + 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_height = self.mine_field.field_height + 5
             self.init_mine_field(field_height=new_height)
-        elif event.key() == Qt.Key.Key_J:
+        elif event.key() == Qt.Key.Key_K:
             new_height = self.mine_field.field_height - 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_height = self.mine_field.field_height - 5
             self.init_mine_field(field_height=new_height)
 
-        elif event.key() == Qt.Key.Key_N:
+        elif event.key() == Qt.Key.Key_M:
             new_count = self.mine_field.mine_count + 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_count = self.mine_field.mine_count + 5
             self.init_mine_field(mine_count=new_count)
-        elif event.key() == Qt.Key.Key_M:
+        elif event.key() == Qt.Key.Key_Period:
             new_count = self.mine_field.mine_count - 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_count = self.mine_field.mine_count - 5
@@ -450,7 +458,7 @@ class MainWindow(QMainWindow):
             self.cheat_mode = not self.cheat_mode
             print(f"CHEAT_MODE: {self.cheat_mode}")
             for land in self.mine_field.land_list:
-                land.reveal(self.cheat_mode)
+                land.update_tooltip(self.cheat_mode)
 
         elif event.key() == Qt.Key.Key_A:
             self.ai.auto_click = not self.ai.auto_click
@@ -464,23 +472,24 @@ class MainWindow(QMainWindow):
                 self.ai.random_click()
         elif event.key() == Qt.Key.Key_F:
             if not MainWindow().game_terminated:
-                self.ai_start_time = datetime.datetime.now()
-                self.ai.auto_step = 1
-                self.threadpool.start(self.ai)
+                self.start_ai(step=1)
+
         elif event.key() == Qt.Key.Key_G:
             if not MainWindow().game_terminated:
-                self.ai_start_time = datetime.datetime.now()
-                self.ai.auto_step = -1
-                self.threadpool.start(self.ai)
+                self.start_ai()
+        elif event.key() == Qt.Key.Key_H:
+            self.looping = not self.looping
+            if self.looping:
+                self.init_mine_field()
+                self.start_looper()
 
-        # elif event.key() == Qt.Key.Key_0:
-        #     while AUTO_SOLVING:
-        #         self.mine_field.generate_mine()
-        #         self.setWindowTitle(str(MAP_X) + " X " + str(MAP_Y) + " with " + str(MINE_COUNT) + " Mines" + " : )")
-        #         self.set_message("New Game Ready")
-        #         while AUTO_SOLVING and not GAME_TERMINATED:
-        #             AUTO_SOLVING = AI().solve()
-        #             self.update()
+        if event.key() != Qt.Key.Key_H:
+            self.looping = False
+
+    def start_ai(self, step=-1):
+        self.ai.auto_step = step
+        self.ai_start_time = datetime.datetime.now()
+        self.ai_pool.start(self.ai)
 
     def ai_click(self, land):
         land.auto_click()
@@ -493,14 +502,70 @@ class MainWindow(QMainWindow):
     def ai_finished(self):
         time_delta = datetime.datetime.now() - self.ai_start_time
         print(f"Usage Time: {time_delta.seconds}.{time_delta.microseconds}")
+        if self.looping:
+            self.ai_looper.status.ai_finished.emit()
+
+    def start_looper(self):
+        self.ai.auto_click = True
+        self.ai.auto_random_click = True
+        self.ai_pool.start(self.ai_looper)
 
 
 def main():
-    # sys.argv += ['-platform', 'windows:darkmode=2']
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     MainWindow().show()
     sys.exit(app.exec())
+
+
+class AILooper(QRunnable):
+    class Status(QObject):
+        init_map = Signal()         # --> Master
+        map_ready = Signal()        # Master -->
+        start_ai = Signal()         # --> Master
+        ai_finished = Signal()      # Master -->
+        stop_looping = Signal()     # Master -->
+
+    status = None
+
+    looping = True
+    map_initializing = False
+    ai_running = False
+
+    def __init__(self):
+        super().__init__()
+        self.status = AILooper.Status()
+        self.status.map_ready.connect(self.map_ready)
+        self.status.ai_finished.connect(self.ai_finished)
+        self.status.stop_looping.connect(self.stop_looping)
+
+    def map_ready(self):
+        self.map_initializing = False
+
+    def ai_finished(self):
+        self.ai_running = False
+
+    def stop_looping(self):
+        self.looping = False
+
+    @Slot()
+    def run(self):
+        self.looping = True
+        while self.looping:
+            print("[Looper] Init Map")
+            self.map_initializing = True
+            self.status.init_map.emit()
+            while self.map_initializing:
+                pass
+            if not self.looping:
+                break
+            time.sleep(1)
+            print("[Looper] Start AI")
+            self.ai_running = True
+            self.status.start_ai.emit()
+            while self.ai_running:
+                pass
+            time.sleep(3)
 
 
 class AI(QRunnable):
@@ -570,10 +635,10 @@ class AI(QRunnable):
             else:
                 if not have_mine:
                     print(f"[AI] ({land.x}, {land.y}) is empty")
-                    self.result.message.emit(f"({land.x}, {land.y}) is empty")
+                    self.result.message.emit(f"({land.x + 1}, {land.y + 1}) is empty")
                 else:
                     print(f"[AI] ({land.x}, {land.y}) have mine")
-                    self.result.message.emit(f"({land.x}, {land.y}) have mine")
+                    self.result.message.emit(f"({land.x + 1}, {land.y + 1}) have mine")
             self.result.emote.emit(":D")
             if self.debug_print:
                 for cond in self.condition_list:
@@ -625,7 +690,7 @@ class AI(QRunnable):
                 })
 
     def random_click(self):
-        print("[AI]Random Click")
+        print("[AI] Random Click")
         mine_field = MainWindow().mine_field
         land_list = [land for land in mine_field.land_list if not land.checked and land.cover == SYMBOL_BLANK]
         if len(land_list) == 0:
