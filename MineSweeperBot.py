@@ -46,7 +46,7 @@ class Land(QPushButton):
             font: "Roman Times";
             font-size: 10;
             font-weight: bold;
-            background-color: #434343;
+            background-color: #292929;
         }
         QPushButton:pressed {
             border: 2px solid #a02020;
@@ -87,85 +87,67 @@ class Land(QPushButton):
         self.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
     
     def left_click(self, chain=False):
-
         mine_field = self.parent()
-
         field_width = self.parent().field_width
         field_height = self.parent().field_height
 
         if MainWindow().game_terminated or not MainWindow().game_terminated and self.cover != SYMBOL_BLANK:
-            if self.isChecked():
-                self.setChecked(False)
-            else:
-                self.setChecked(True)
-        if self.isChecked():
+            # prevent changing check status
+            self.setChecked(self.checked)
+            return
+
+        self.checked = True
+        if not chain:
             print(f"Click ({self.x}, {self.y})")
-            if len([x for x in mine_field.land_list if x.have_mine is True]) == 0:
-                mine_field.generate_mine(self.x, self.y)
-            self.parent().check_end_game(self.x, self.y)
-            if not MainWindow().game_terminated and self.content == SYMBOL_BLANK:
-                for _x in [-1, 0, 1]:
-                    for _y in [-1, 0, 1]:
-                        if _x == 0 and _y == 0:
-                            continue
-                        if 0 <= self.x + _x < field_width and 0 <= self.y + _y < field_height:
-                            land = self.parent().land_list[(self.x + _x) + field_width * (self.y + _y)]
-                            if not land.isChecked():
-                                land.left_click(chain=True)
-                self.parent().check_end_game(self.x, self.y)
-            self.update_ui()
-        else:
-            # print(f"Chain Click ({self.x}, {self.y})")
-            self.setChecked(True)
+        if len([x for x in mine_field.land_list if x.have_mine is True]) == 0:
+            # first click always safe
+            mine_field.generate_mine(self.x, self.y)
+
+        self.parent().check_end_game(self.x, self.y)
+        if not MainWindow().game_terminated:
             flag_num = 0
-            for x in [-1, 0, 1]:
-                for y in [-1, 0, 1]:
+            for x, y in itertools.product([-1, 0, 1], [-1, 0, 1]):
+                if x == 0 and y == 0:
+                    continue
+                if 0 <= self.x + x < field_width and 0 <= self.y + y < field_height:
+                    land = self.parent().land_list[(self.x + x) + field_width * (self.y + y)]
+                    if not land.checked and land.cover == SYMBOL_FLAG:
+                        flag_num += 1
+            if flag_num == self.adjacent_mine_count:
+                for x, y in itertools.product([-1, 0, 1], [-1, 0, 1]):
                     if x == 0 and y == 0:
                         continue
                     if 0 <= self.x + x < field_width and 0 <= self.y + y < field_height:
                         land = self.parent().land_list[(self.x + x) + field_width * (self.y + y)]
-                        if not land.isChecked() and land.cover == SYMBOL_FLAG:
-                            flag_num += 1
-            if flag_num == self.adjacent_mine_count:
-                for x in [-1, 0, 1]:
-                    for y in [-1, 0, 1]:
-                        if x == 0 and y == 0:
-                            continue
-                        if 0 <= self.x + x < field_width and 0 <= self.y + y < field_height:
-                            land = self.parent().land_list[(self.x + x) + field_width * (self.y + y)]
-                            if not land.isChecked() and land.cover != SYMBOL_FLAG:
-                                land.left_click(chain=True)
-            if not chain:
-                self.update_ui()
+                        if not land.checked and land.cover == SYMBOL_BLANK:
+                            land.left_click(chain=True)
+        if not chain:
+            self.parent().check_end_game(self.x, self.y)
+            self.update_ui(focus=True)
 
         if not MainWindow().game_terminated:
-            mine_field = self.parent()
             MainWindow().show_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
 
     def auto_left_click(self):
-        print(f"Auto Click")
-        self.setChecked(True)
+        # print(f"Auto Click")
         self.left_click()
     
     def right_click(self):
         if not MainWindow().game_terminated:
             print(f"Mark  ({self.x}, {self.y})")
-            if not self.isChecked():
+            if not self.checked:
                 if self.cover == SYMBOL_BLANK:
                     self.cover = SYMBOL_FLAG
                 elif self.cover == SYMBOL_FLAG:
                     self.cover = SYMBOL_UNKNOWN
                 elif self.cover == SYMBOL_UNKNOWN:
                     self.cover = SYMBOL_BLANK
-            # else:
-            #     if not MainWindow().cheat_mode:
-            #         self.setChecked(True)
             mine_field = self.parent()
             MainWindow().show_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
-        self.update_ui()
+        self.update_ui(focus=True)
     
     def auto_mark(self):
-        print(f"Auto Mark")
+        # print(f"Auto Mark")
         while not MainWindow().game_terminated and self.cover != SYMBOL_FLAG:
             self.right_click()
     
@@ -176,9 +158,10 @@ class Land(QPushButton):
             else:
                 self.setToolTip(f"{self.x + MAP_X * self.y}({self.x}, {self.y})")
 
-    def update_ui(self, focus=True):
+    def update_ui(self, focus=False):
         style_sheet = self.focus_style_sheet if focus else self.style_sheet
-        if self.isChecked():
+        self.setChecked(self.checked)
+        if self.checked:
             self.setText(self.content)
             color_dict = {
                 " ": "white",
@@ -197,6 +180,7 @@ class Land(QPushButton):
             self.setText(self.cover)
             color_dict = {
                 " ": "white",
+                "X": "red",
                 "!": "#f02020",
                 "?": "#2020f0",
             }
@@ -208,7 +192,7 @@ class Land(QPushButton):
             for land in MainWindow().mine_field.land_list:
                 if land == self:
                     continue
-                land.update_ui(focus=False)
+                land.update_ui()
 
     def to_string(self):
         return f"{self.id} ({self.x}, {self.y})"
@@ -245,9 +229,8 @@ class MineField(QWidget):
 
     def reset_mine_field(self):
         for land in self.land_list:
-            land.setChecked(False)
             land.cover = SYMBOL_BLANK
-            land.setText(land.cover)
+            land.update_ui()
 
     def generate_mine(self, safe_x=-9, safe_y=-9):
         for x in range(self.field_width):
@@ -257,8 +240,7 @@ class MineField(QWidget):
                 self.land_list[x + self.field_width * y].checked = False
                 self.land_list[x + self.field_width * y].cover = SYMBOL_BLANK
                 self.land_list[x + self.field_width * y].content = SYMBOL_BLANK
-                self.land_list[x + self.field_width * y].setChecked(False)
-                self.land_list[x + self.field_width * y].setText(SYMBOL_BLANK)
+                self.land_list[x + self.field_width * y].update_ui()
 
         for _ in range(self.mine_count):
             x, y = -1, -1
@@ -268,12 +250,11 @@ class MineField(QWidget):
                 if abs(x - safe_x) <= 1 and abs(y - safe_y) <= 1:
                     x, y = -1, -1
             self.land_list[x + self.field_width * y].have_mine = True
-            for _x in [-1, 0, 1]:
-                for _y in [-1, 0, 1]:
-                    if _x == 0 and _y == 0:
-                        continue
-                    if 0 <= (x + _x) < self.field_width and 0 <= (y + _y) < self.field_height:
-                        self.land_list[(x + _x) + self.field_width * (y + _y)].adjacent_mine_count += 1
+            for _x, _y in itertools.product([-1, 0, 1], [-1, 0, 1]):
+                if _x == 0 and _y == 0:
+                    continue
+                if 0 <= (x + _x) < self.field_width and 0 <= (y + _y) < self.field_height:
+                    self.land_list[(x + _x) + self.field_width * (y + _y)].adjacent_mine_count += 1
 
         for y in range(self.field_height):
             for x in range(self.field_width):
@@ -293,10 +274,10 @@ class MineField(QWidget):
         }
 
     def revealed_land_count(self):
-        return len([x for x in self.land_list if x.isChecked()])
+        return len([x for x in self.land_list if x.checked])
 
     def marked_land_count(self):
-        return len([x for x in self.land_list if not x.isChecked() and x.cover == SYMBOL_FLAG])
+        return len([x for x in self.land_list if not x.checked and x.cover == SYMBOL_FLAG])
 
     def check_end_game(self, x, y):
         if self.land_list[x + self.field_width * y].have_mine:
@@ -304,8 +285,8 @@ class MineField(QWidget):
             self.parent().show_message("YOU FAILED")
             for land in self.land_list:
                 if land.have_mine:
-                    # land.cover = SYMBOL_MINE
-                    land.setText(SYMBOL_MINE)
+                    land.cover = SYMBOL_MINE
+                    land.update_ui()
         elif self.revealed_land_count() == self.field_width * self.field_height - self.mine_count:
             MainWindow().game_terminated = True
             self.parent().show_message("YOU WIN")
@@ -313,7 +294,7 @@ class MineField(QWidget):
                 for x in range(self.field_width):
                     if self.land_list[x + self.field_width * y].have_mine:
                         self.land_list[x + self.field_width * y].cover = SYMBOL_FLAG
-                        self.land_list[x + self.field_width * y].setText(SYMBOL_FLAG)
+                        self.land_list[x + self.field_width * y].update_ui()
     
     def left_click(self):
         self.sender().left_click()
@@ -541,7 +522,7 @@ class AI:
         mine_field = MainWindow().mine_field
         self.condition_list = list()
         for land in mine_field.land_list:
-            if land.isChecked() and land.adjacent_mine_count != 0:
+            if land.checked and land.adjacent_mine_count != 0:
                 x, y = land.x, land.y
                 condition = {
                     "land": land,
@@ -553,7 +534,7 @@ class AI:
                         continue
                     if 0 <= x + _x < mine_field.field_width and 0 <= y + _y < mine_field.field_height:
                         adj_land = mine_field.land_list[(x + _x) + mine_field.field_width * (y + _y)]
-                        if not adj_land.isChecked():
+                        if not adj_land.checked:
                             if adj_land.cover != SYMBOL_FLAG:
                                 condition["adj_land"].append(adj_land)
                             else:
@@ -574,7 +555,7 @@ class AI:
     def random_click(num):
         print("[AI]Random Click")
         mine_field = MainWindow().mine_field
-        land_list = [land for land in mine_field.land_list if not land.isChecked() and land.cover == SYMBOL_BLANK]
+        land_list = [land for land in mine_field.land_list if not land.checked and land.cover == SYMBOL_BLANK]
         if len(land_list) == 0:
             return False
         i = 0
@@ -595,22 +576,42 @@ class AI:
                     return condition["adj_land"][0], True
 
             condition_updated = False
-            for cond_a, cond_b in itertools.product(self.condition_list, self.condition_list):
-                if cond_a["land"].id >= cond_b["land"].id:
+            for a, b in itertools.product(range(len(self.condition_list)), range(len(self.condition_list))):
+                if a >= b:
                     continue
-                if cond_a["possible_mine"] == cond_b["possible_mine"]:
-                    if len(cond_a["adj_land"]) != len(cond_b["adj_land"]) \
-                            and self.is_include(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id):
-                        empty_land = self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id)[0][0]
-                        return empty_land, False
+                cond_a, cond_b = self.condition_list[a], self.condition_list[b]
+                if self.is_include(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id):
+                    if cond_a["possible_mine"] == cond_b["possible_mine"]:
+                        if len(cond_a["adj_land"]) != len(cond_b["adj_land"]):
+                            empty_land = self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id)[0][0]
+                            return empty_land, False
 
-                else:
-                    if abs(cond_a["possible_mine"] - cond_b["possible_mine"]) \
-                            == abs(len(cond_a["adj_land"]) - len(cond_b["adj_land"])) \
-                            and self.is_include(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id):
-                        mine_land = self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id)[0][0]
-                        return mine_land, True
-            break
+                    else:  # cond_a["possible_mine"] != cond_b["possible_mine"]
+                        possible_mine_land, cond_a_new_adj, cond_b_new_adj = \
+                            self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x.id)
+                        if abs(cond_a["possible_mine"] - cond_b["possible_mine"]) \
+                                == abs(len(cond_a["adj_land"]) - len(cond_b["adj_land"])):
+                            return possible_mine_land[0], True
+                        elif len(cond_a_new_adj) > 0:
+                            self.condition_list[a]["adj_land"] = cond_a_new_adj
+                            self.condition_list[a]["possible_mine"] = cond_a["possible_mine"] - cond_b["possible_mine"]
+                            condition_updated = True
+                            print({
+                                "land": self.condition_list[a]["land"].to_string(),
+                                "possible_mine": self.condition_list[a]["possible_mine"],
+                                "adj_land": [land.to_string() for land in self.condition_list[a]["adj_land"]],
+                            })
+                        else:  # len(cond_b_new_adj) > 0:
+                            self.condition_list[b]["adj_land"] = cond_b_new_adj
+                            self.condition_list[b]["possible_mine"] = cond_b["possible_mine"] - cond_a["possible_mine"]
+                            condition_updated = True
+                            print({
+                                "land": self.condition_list[b]["land"].to_string(),
+                                "possible_mine": self.condition_list[b]["possible_mine"],
+                                "adj_land": [land.to_string() for land in self.condition_list[b]["adj_land"]],
+                            })
+            if not condition_updated:
+                break
         return None, None
 
     @staticmethod
