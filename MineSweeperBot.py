@@ -1,7 +1,9 @@
 
-from PySide6.QtGui import QIcon, QPixmap, QAction
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget,  QGridLayout, QPushButton, QToolBar
 from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal
+from PySide6.QtGui import QIcon, QPixmap, QAction, QIntValidator
+from PySide6.QtWidgets import QApplication, QMainWindow, QDialog
+from PySide6.QtWidgets import QWidget, QGridLayout
+from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit
 from random import randint
 
 import datetime
@@ -301,6 +303,104 @@ def singleton(cls):
     return get_instance
 
 
+class NumberLineEdit(QLineEdit):
+
+    def wheelEvent(self, event):
+        current_value = int(self.text()) if self.text().isdigit() else 0
+        delta = event.angleDelta().y()
+        if delta > 0:
+            current_value += 1
+        else:
+            current_value -= 1
+        self.setText(str(current_value))
+
+
+class CustomFieldDialog(QDialog):
+    width = 9
+    height = 9
+    mine = 10
+
+    mine_validator = None
+    width_edit = None
+    height_edit = None
+    mine_edit = None
+    difficulty_label = "10%"
+
+    def __init__(self, parent, width, height, mine):
+        super().__init__(parent)
+
+        self.width = width
+        self.height = height
+        self.mine = mine
+
+        self.setWindowTitle("Custom Mine Field")
+
+        size_validator = QIntValidator()
+        size_validator.setRange(9, 1000)
+
+        self.mine_validator = QIntValidator()
+
+        self.width_edit = NumberLineEdit()
+        self.width_edit.setText(str(self.width))
+        self.width_edit.setValidator(size_validator)
+        self.width_edit.textChanged.connect(self.width_change)
+
+        self.height_edit = NumberLineEdit()
+        self.height_edit.setText(str(self.height))
+        self.height_edit.setValidator(size_validator)
+        self.height_edit.textChanged.connect(self.height_change)
+
+        self.mine_edit = NumberLineEdit()
+        self.mine_edit.setText(str(self.mine))
+        self.mine_edit.setValidator(self.mine_validator)
+        self.mine_edit.textChanged.connect(self.mine_change)
+
+        self.difficulty_label = QLabel()
+
+        self.update_variable()
+
+        confirm = QPushButton("Confirm")
+        confirm.clicked.connect(self.confirm)
+
+        grid = QGridLayout()
+
+        grid.addWidget(QLabel("Width:"), 1, 1)
+        grid.addWidget(self.width_edit, 1, 2)
+
+        grid.addWidget(QLabel("Height:"), 2, 1)
+        grid.addWidget(self.height_edit, 2, 2)
+
+        grid.addWidget(QLabel("Mines:"), 3, 1)
+        grid.addWidget(self.mine_edit, 3, 2)
+
+        grid.addWidget(QLabel("Difficulty:"), 4, 1)
+        grid.addWidget(self.difficulty_label, 4, 2)
+
+        grid.addWidget(confirm, 5, 1, 1, 2)
+
+        self.setLayout(grid)
+
+    def width_change(self):
+        self.width = int(self.width_edit.text())
+        self.update_variable()
+
+    def height_change(self):
+        self.height = int(self.height_edit.text())
+        self.update_variable()
+
+    def mine_change(self):
+        self.mine = int(self.mine_edit.text())
+        self.update_variable()
+
+    def update_variable(self):
+        self.mine_validator.setRange(1, (self.width - 1) * (self.height - 1))
+        self.difficulty_label.setText(f"{self.mine / (self.width * self.height) * 100:.2f}%")
+
+    def confirm(self):
+        self.parent().init_mine_field(self.width, self.height, self.mine)
+        self.done(0)
+
+
 @singleton
 class MainWindow(QMainWindow):
     mine_field = None
@@ -345,14 +445,9 @@ class MainWindow(QMainWindow):
         icon.addPixmap(QPixmap("Mine.ico"))
         self.setWindowIcon(icon)
 
-        # main_tool_bar = QToolBar()
-        # self.addToolBar(main_tool_bar
-        # main_tool_bar.addAction(button_action)
-
         menu = self.menuBar()
         # Menu: Game
         game_menu = menu.addMenu("&Game")
-        game_menu.setStatusTip("Game menu")
         game_menu.addAction(
             self.create_menu_action(
                 "New Game", "New Game", Qt.Key.Key_R, self.re_init_mine_field))
@@ -371,14 +466,14 @@ class MainWindow(QMainWindow):
         game_menu.addSeparator()
         difficulty_menu.addAction(
             self.create_menu_action(
-                "Custom...", "Custom field size and mine number (TODO)"))
+                "Custom...", "Custom field size and mine number",
+                Qt.Key.Key_C, self.custom_mine_field))
         game_menu.addSeparator()
         game_menu.addAction(
             self.create_menu_action(
                 "Exit", "Exit the game", Qt.Key.Key_Escape, self.exit))
         # Menu: Bot
         bot_menu = menu.addMenu("&Bot")
-        game_menu.setStatusTip("Bot menu")
         bot_menu.addAction(
             self.create_menu_action(
                 "Auto Click", "Auto click if empty land found when solving",
@@ -413,28 +508,24 @@ class MainWindow(QMainWindow):
                 "&About", "Go to project home page",
                 trigger=self.about))
 
-    def init_mine_field(self, field_width=0, field_height=0, mine_count=0):
-        if self.mine_field is not None:
-            field_size = self.mine_field.field_size()
-        else:
-            field_size = dict()
-        if field_width > 0:
-            field_size["field_width"] = field_width
-        if field_height > 0:
-            field_size["field_height"] = field_height
-        if mine_count > 0:
-            field_size["mine_count"] = mine_count
+    def update_title(self):
+        field = self.mine_field
+        self.setWindowTitle(
+            f"{field.field_width} X {field.field_height} with {field.mine_count} "
+            f"({field.mine_count / (field.field_width * field.field_height) * 100:.2f}%) Mines "
+            f"{self.emote}"
+        )
 
-        self.mine_field = MineField(self, **field_size)
-        self.game_terminated = False
+    def update_status_bar(self):
+        self.statusBar().showMessage(self.status)
 
-        self.setCentralWidget(self.mine_field)
-        self.adjustSize()
-        self.set_emote("")
-        self.set_message("New Game Ready")
+    def set_emote(self, emote):
+        self.emote = emote
+        self.update_title()
 
-        if self.ai_looper is not None and self.ai_looper.looping:
-            self.ai_looper.status.map_ready.emit()  # --> ai_looper
+    def set_message(self, msg):
+        self.status = msg
+        self.update_status_bar()
 
     def re_init_mine_field(self):
         self.stop_looper()
@@ -456,24 +547,11 @@ class MainWindow(QMainWindow):
         self.stop_looper()
         return self.init_mine_field(30, 16, 99)
 
-    def update_title(self):
-        field = self.mine_field
-        self.setWindowTitle(
-            f"{field.field_width} X {field.field_height} with {field.mine_count} "
-            f"({field.mine_count / (field.field_width * field.field_height) * 100:.2f}%) Mines "
-            f"{self.emote}"
-        )
-
-    def update_status_bar(self):
-        self.statusBar().showMessage(self.status)
-
-    def set_emote(self, emote):
-        self.emote = emote
-        self.update_title()
-    
-    def set_message(self, msg):
-        self.status = msg
-        self.update_status_bar()
+    def custom_mine_field(self):
+        field_size = self.mine_field.field_size()
+        dialog = CustomFieldDialog(
+            self, field_size["field_width"], field_size["field_height"], field_size["mine_count"])
+        dialog.exec()
 
     def ai_switch_auto_click(self):
         self.stop_looper()
@@ -525,6 +603,29 @@ class MainWindow(QMainWindow):
             menu_action.setCheckable(check_able)
         self.menu_action_dict[title] = menu_action
         return menu_action
+
+    def init_mine_field(self, field_width=0, field_height=0, mine_count=0):
+        if self.mine_field is not None:
+            field_size = self.mine_field.field_size()
+        else:
+            field_size = dict()
+        if field_width > 0:
+            field_size["field_width"] = field_width
+        if field_height > 0:
+            field_size["field_height"] = field_height
+        if mine_count > 0:
+            field_size["mine_count"] = mine_count
+
+        self.mine_field = MineField(self, **field_size)
+        self.game_terminated = False
+
+        self.setCentralWidget(self.mine_field)
+        self.adjustSize()
+        self.set_emote("")
+        self.set_message("New Game Ready")
+
+        if self.ai_looper is not None and self.ai_looper.looping:
+            self.ai_looper.status.map_ready.emit()  # --> ai_looper
 
     def keyPressEvent(self, event):
         # if event.key() < 256:
@@ -590,15 +691,15 @@ class MainWindow(QMainWindow):
         self.ai_start_time = datetime.datetime.now()
         self.ai_pool.start(self.ai)
 
-    def ai_click(self, land):  # ai -->
+    def ai_click(self, land):  # <-- ai
         land.auto_click()
         self.ai.result.game_update_completed.emit()  # --> ai
 
-    def ai_mark(self, land):  # ai -->
+    def ai_mark(self, land):  # <-- ai
         land.auto_mark()
         self.ai.result.game_update_completed.emit()  # --> ai
 
-    def ai_finished(self):  # ai -->
+    def ai_finished(self):  # <-- ai
         time_delta = datetime.datetime.now() - self.ai_start_time
         print(f"Usage Time: {time_delta.seconds}.{time_delta.microseconds}")
         if self.ai_looper.looping:
@@ -872,20 +973,20 @@ class AILooper(QRunnable):
     def run(self):
         self.looping = True
         while self.looping:
-            print("[Looper] Init Map")
-            self.map_initializing = True
-            self.status.init_map.emit()
-            while self.map_initializing:
-                pass
-            if not self.looping:
-                break
-            time.sleep(1)
             print("[Looper] Start AI")
             self.ai_running = True
             self.status.start_ai.emit()
             while self.ai_running:
                 pass
+            if not self.looping:
+                break
             time.sleep(3)
+            print("[Looper] Init Map")
+            self.map_initializing = True
+            self.status.init_map.emit()
+            while self.map_initializing:
+                pass
+            time.sleep(1)
 
 
 if __name__ == '__main__':
