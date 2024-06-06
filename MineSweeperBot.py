@@ -208,7 +208,7 @@ class MineField(QWidget):
         super().__init__(parent)
         self.field_width = min(max(9, field_width), 1000)
         self.field_height = min(max(3, field_height), 1000)
-        self.mine_count = min(max(1, mine_count), self.field_width * self.field_height - 9)
+        self.mine_count = min(max(1, mine_count), (self.field_width - 1) * (self.field_height - 1))
         self.init_mine_field()
     
     def init_mine_field(self):
@@ -372,17 +372,17 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(self.mine_field)
         self.adjustSize()
-        self.update_title()
+        self.set_emote("")
         self.set_message("New Game Ready")
 
         if self.looping:
             self.ai_looper.status.map_ready.emit()
 
     def update_title(self):
+        field = self.mine_field
         self.setWindowTitle(
-            f"{self.mine_field.field_width} "
-            f"X {self.mine_field.field_height} "
-            f"with {self.mine_field.mine_count} Mines "
+            f"{field.field_width} X {field.field_height} with {field.mine_count} "
+            f"({field.mine_count / (field.field_width * field.field_height) * 100:.2f}%) Mines "
             f"{self.emote}"
         )
 
@@ -480,7 +480,6 @@ class MainWindow(QMainWindow):
         elif event.key() == Qt.Key.Key_H:
             self.looping = not self.looping
             if self.looping:
-                self.init_mine_field()
                 self.start_looper()
 
         if event.key() != Qt.Key.Key_H:
@@ -565,7 +564,7 @@ class AILooper(QRunnable):
             self.status.start_ai.emit()
             while self.ai_running:
                 pass
-            time.sleep(3)
+            time.sleep(5)
 
 
 class AI(QRunnable):
