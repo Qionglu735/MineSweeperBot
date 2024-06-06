@@ -381,15 +381,24 @@ class CustomFieldDialog(QDialog):
         self.setLayout(grid)
 
     def width_change(self):
-        self.width = int(self.width_edit.text())
+        try:
+            self.width = int(self.width_edit.text())
+        except ValueError:
+            self.width = 9
         self.update_variable()
 
     def height_change(self):
-        self.height = int(self.height_edit.text())
+        try:
+            self.height = int(self.height_edit.text())
+        except ValueError:
+            self.height = 9
         self.update_variable()
 
     def mine_change(self):
-        self.mine = int(self.mine_edit.text())
+        try:
+            self.mine = int(self.mine_edit.text())
+        except ValueError:
+            self.mine = 10
         self.update_variable()
 
     def update_variable(self):
@@ -973,7 +982,7 @@ class AILooper(QRunnable):
     def run(self):
         self.looping = True
         while self.looping:
-            print("[Looper] Start AI")
+            # print("[Looper] Start AI")
             self.ai_running = True
             self.status.start_ai.emit()
             while self.ai_running:
@@ -981,7 +990,7 @@ class AILooper(QRunnable):
             if not self.looping:
                 break
             time.sleep(3)
-            print("[Looper] Init Map")
+            # print("[Looper] Init Map")
             self.map_initializing = True
             self.status.init_map.emit()
             while self.map_initializing:
