@@ -3,13 +3,46 @@ from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal
 from PySide6.QtGui import QIcon, QPixmap, QAction, QIntValidator
 from PySide6.QtWidgets import QApplication, QMainWindow, QDialog
 from PySide6.QtWidgets import QWidget, QGridLayout
-from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit
+from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox
 from random import randint
 
 import datetime
 import itertools
 import sys
 import time
+import webbrowser
+
+PRESET = [
+    (9, 9, 10, ),  # Easy, 12.35%
+    (16, 16, 40, ),  # Moderate, 15.62%
+    (30, 16, 99, ),  # Hard, 20.62%
+]
+
+FIELD_PRESET = [
+    (10, 10, "Small", ),
+    (20, 20, "Medium", ),
+    (40, 20, "Large", ),
+    (60, 30, "Huge", ),
+    (80, 40, "Expansive", ),
+    (100, 50, "Enormous", ),
+]
+
+DIFFICULTY_PRESET = [
+    (0.10, "Simple", ),
+    (0.12, "Easy", ),
+    (0.14, "Moderate", ),
+    (0.16, "Manageable", ),
+    (0.18, "Challenging", ),
+    (0.20, "Hard", ),
+    (0.22, "Extreme", ),
+    (0.24, "Impossible", ),
+]
+
+MIN_WIDTH = 9
+MAX_WIDTH = 1000
+
+MIN_HEIGHT = 3
+MAX_HEIGHT = 1000
 
 SYMBOL_BLANK = " "
 SYMBOL_MINE = "X"
@@ -192,10 +225,10 @@ class MineField(QWidget):
 
     land_list = list()
 
-    def __init__(self, parent, field_width=9, field_height=9, mine_count=10):
+    def __init__(self, parent, field_width=PRESET[0][0], field_height=PRESET[0][1], mine_count=PRESET[0][2]):
         super().__init__(parent)
-        self.field_width = min(max(9, field_width), 1000)
-        self.field_height = min(max(3, field_height), 1000)
+        self.field_width = min(max(MIN_WIDTH, field_width), MAX_WIDTH)
+        self.field_height = min(max(MIN_HEIGHT, field_height), MAX_HEIGHT)
         self.mine_count = min(max(1, mine_count), (self.field_width - 1) * (self.field_height - 1))
         self.init_mine_field()
     
@@ -316,13 +349,13 @@ class NumberLineEdit(QLineEdit):
 
 
 class CustomFieldDialog(QDialog):
-    width = 9
-    height = 9
-    mine = 10
+    width, height, mine = PRESET[0]
 
     mine_validator = None
     width_edit = None
     height_edit = None
+    preset_combo = None
+    preset_combo_change = False
     mine_edit = None
     difficulty_label = "10%"
 
@@ -335,20 +368,27 @@ class CustomFieldDialog(QDialog):
 
         self.setWindowTitle("Custom Mine Field")
 
-        size_validator = QIntValidator()
-        size_validator.setRange(9, 1000)
+        width_validator = QIntValidator()
+        width_validator.setRange(MIN_WIDTH, MAX_WIDTH)
+
+        height_validator = QIntValidator()
+        height_validator.setRange(MIN_HEIGHT, MAX_HEIGHT)
 
         self.mine_validator = QIntValidator()
 
         self.width_edit = NumberLineEdit()
         self.width_edit.setText(str(self.width))
-        self.width_edit.setValidator(size_validator)
+        self.width_edit.setValidator(width_validator)
         self.width_edit.textChanged.connect(self.width_change)
 
         self.height_edit = NumberLineEdit()
         self.height_edit.setText(str(self.height))
-        self.height_edit.setValidator(size_validator)
+        self.height_edit.setValidator(height_validator)
         self.height_edit.textChanged.connect(self.height_change)
+
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItems([x[1] for x in DIFFICULTY_PRESET])
+        self.preset_combo.currentIndexChanged.connect(self.preset_change)
 
         self.mine_edit = NumberLineEdit()
         self.mine_edit.setText(str(self.mine))
@@ -358,6 +398,7 @@ class CustomFieldDialog(QDialog):
         self.difficulty_label = QLabel()
 
         self.update_variable()
+        self.update_combo()
 
         confirm = QPushButton("Confirm")
         confirm.clicked.connect(self.confirm)
@@ -370,40 +411,64 @@ class CustomFieldDialog(QDialog):
         grid.addWidget(QLabel("Height:"), 2, 1)
         grid.addWidget(self.height_edit, 2, 2)
 
-        grid.addWidget(QLabel("Mines:"), 3, 1)
-        grid.addWidget(self.mine_edit, 3, 2)
+        grid.addWidget(QLabel("Difficulty Preset:"), 3, 1)
+        grid.addWidget(self.preset_combo, 3, 2)
 
-        grid.addWidget(QLabel("Difficulty:"), 4, 1)
-        grid.addWidget(self.difficulty_label, 4, 2)
+        grid.addWidget(QLabel("Mines:"), 4, 1)
+        grid.addWidget(self.mine_edit, 4, 2)
 
-        grid.addWidget(confirm, 5, 1, 1, 2)
+        grid.addWidget(QLabel("Difficulty:"), 5, 1)
+        grid.addWidget(self.difficulty_label, 5, 2)
+
+        grid.addWidget(confirm, 6, 1, 1, 2)
 
         self.setLayout(grid)
 
-    def width_change(self):
-        try:
-            self.width = int(self.width_edit.text())
-        except ValueError:
-            self.width = 9
-        self.update_variable()
+    def width_change(self, text):
+        if self.width_edit.hasAcceptableInput():
+            self.width = int(text)
+            self.update_variable()
+            self.preset_combo_change = False
+            self.update_combo()
+        else:
+            self.width_edit.setText(str(self.width))
 
-    def height_change(self):
-        try:
-            self.height = int(self.height_edit.text())
-        except ValueError:
-            self.height = 9
-        self.update_variable()
+    def height_change(self, text):
+        if self.height_edit.hasAcceptableInput():
+            self.height = int(text)
+            self.preset_combo_change = False
+            self.update_variable()
+            self.update_combo()
+        else:
+            self.height_edit.setText(str(self.height))
 
-    def mine_change(self):
-        try:
-            self.mine = int(self.mine_edit.text())
-        except ValueError:
-            self.mine = 10
-        self.update_variable()
+    def preset_change(self, index):
+        if self.preset_combo_change:
+            mine = max(1, int(self.width * self.height * DIFFICULTY_PRESET[index][0]))
+            self.mine_edit.setText(str(mine))
+
+    def mine_change(self, text):
+        if self.mine_edit.hasAcceptableInput():
+            self.mine = int(text)
+            self.update_variable()
+            self.preset_combo_change = False
+            self.update_combo()
+        else:
+            self.mine_edit.setText(str(self.mine))
 
     def update_variable(self):
         self.mine_validator.setRange(1, (self.width - 1) * (self.height - 1))
-        self.difficulty_label.setText(f"{self.mine / (self.width * self.height) * 100:.2f}%")
+        difficulty = self.mine / (self.width * self.height)
+        self.difficulty_label.setText(f"{difficulty * 100:.2f}%")
+
+    def update_combo(self):
+        difficulty = self.mine / (self.width * self.height)
+        for i, preset in reversed(list(enumerate(DIFFICULTY_PRESET))):
+            if preset[0] > difficulty:
+                continue
+            self.preset_combo.setCurrentIndex(i)
+            break
+        self.preset_combo_change = True
 
     def confirm(self):
         self.parent().init_mine_field(self.width, self.height, self.mine)
@@ -465,13 +530,16 @@ class MainWindow(QMainWindow):
         difficulty_menu = game_menu.addMenu("Difficulty")
         difficulty_menu.addAction(
             self.create_menu_action(
-                "Easy", "10 x 10 with 9 mines", Qt.Key.Key_Q, self.init_easy_mine_field))
+                "Easy", "{} x {} with {} mines".format(*PRESET[0]),
+                Qt.Key.Key_Q, self.init_easy_mine_field))
         difficulty_menu.addAction(
             self.create_menu_action(
-                "Middle", "16 x 16 with 40 mines", Qt.Key.Key_W, self.init_middle_mine_field))
+                "Medium", "{} x {} with {} mines".format(*PRESET[1]),
+                Qt.Key.Key_W, self.init_middle_mine_field))
         difficulty_menu.addAction(
             self.create_menu_action(
-                "Hard", "30 x 16 with 99 mines", Qt.Key.Key_E, self.init_hard_mine_field))
+                "Hard", "{} x {} with {} mines".format(*PRESET[2]),
+                Qt.Key.Key_E, self.init_hard_mine_field))
         game_menu.addSeparator()
         difficulty_menu.addAction(
             self.create_menu_action(
@@ -480,7 +548,7 @@ class MainWindow(QMainWindow):
         game_menu.addSeparator()
         game_menu.addAction(
             self.create_menu_action(
-                "Exit", "Exit the game", Qt.Key.Key_Escape, self.exit))
+                "Exit", "Exit the game", Qt.Key.Key_Escape, self.app_exit))
         # Menu: Bot
         bot_menu = menu.addMenu("&Bot")
         bot_menu.addAction(
@@ -546,15 +614,15 @@ class MainWindow(QMainWindow):
 
     def init_easy_mine_field(self):
         self.stop_looper()
-        return self.init_mine_field(9, 9, 10)
+        return self.init_mine_field(*PRESET[0])
 
     def init_middle_mine_field(self):
         self.stop_looper()
-        return self.init_mine_field(16, 16, 40)
+        return self.init_mine_field(*PRESET[1])
 
     def init_hard_mine_field(self):
         self.stop_looper()
-        return self.init_mine_field(30, 16, 99)
+        return self.init_mine_field(*PRESET[2])
 
     def custom_mine_field(self):
         field_size = self.mine_field.field_size()
@@ -596,10 +664,9 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def about():
-        import webbrowser
         webbrowser.open("https://github.com/Qionglu735/MineSweeperBot")
 
-    def exit(self):
+    def app_exit(self):
         sys.exit(self.app.exec())
 
     def create_menu_action(self, title, status_tip, short_cut=None, trigger=None, check_able=None):
@@ -693,7 +760,7 @@ class MainWindow(QMainWindow):
                 land.update_tooltip(self.cheat_mode)
 
     def closeEvent(self, event):
-        self.exit()
+        self.app_exit()
 
     def start_ai(self, step=-1):
         self.ai.auto_step = step
