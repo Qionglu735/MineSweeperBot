@@ -4,7 +4,7 @@ from PySide6.QtGui import QIcon, QPixmap, QAction, QIntValidator
 from PySide6.QtWidgets import QApplication, QMainWindow, QDialog
 from PySide6.QtWidgets import QWidget, QGridLayout
 from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox
-from random import randint
+from random import randint, shuffle
 
 import datetime
 import itertools
@@ -70,7 +70,7 @@ class Land(QPushButton):
             background-color: #292929;
         }
         QPushButton:pressed {
-            border: 2px solid #a02020;
+            border: 2px solid #a0a020;
         }
         QPushButton:checked {
             background-color: #232323;
@@ -82,11 +82,43 @@ class Land(QPushButton):
             font: "Roman Times";
             font-size: 10;
             font-weight: bold;
+            border: 2px solid #a0a020;
+            background-color: #434343;
+        }
+        QPushButton:pressed {
+            border: 2px solid #a0a020;
+        }
+        QPushButton:checked {
+            background-color: #232323;
+        }
+    """
+    danger_style_sheet = """
+        QPushButton {
+            color: FONT_COLOR;
+            font: "Roman Times";
+            font-size: 10;
+            font-weight: bold;
             border: 2px solid #a02020;
             background-color: #434343;
         }
         QPushButton:pressed {
-            border: 2px solid #a02020;
+            border: 2px solid #a0a020;
+        }
+        QPushButton:checked {
+            background-color: #232323;
+        }
+    """
+    safe_style_sheet = """
+        QPushButton {
+            color: FONT_COLOR;
+            font: "Roman Times";
+            font-size: 10;
+            font-weight: bold;
+            border: 2px solid #20a020;
+            background-color: #434343;
+        }
+        QPushButton:pressed {
+            border: 2px solid #a0a020;
         }
         QPushButton:checked {
             background-color: #232323;
@@ -105,7 +137,7 @@ class Land(QPushButton):
         self.setCheckable(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.update_tooltip()
-    
+
     def left_click(self, chain=False):
         mine_field = self.parent()
         field_width = self.parent().field_width
@@ -151,7 +183,7 @@ class Land(QPushButton):
     def auto_click(self):
         # print(f"Auto Click")
         self.left_click()
-    
+
     def right_click(self):
         if not MainWindow().game_terminated:
             # print(f"Mark  ({self.x}, {self.y})")
@@ -165,12 +197,12 @@ class Land(QPushButton):
             mine_field = self.parent()
             MainWindow().set_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
         self.update_ui(focus=True)
-    
+
     def auto_mark(self):
         # print(f"Auto Mark")
         while not MainWindow().game_terminated and self.cover != SYMBOL_FLAG:
             self.right_click()
-    
+
     def update_tooltip(self, cheat_mode=False):
         mine_field = self.parent()
         if self.have_mine and cheat_mode:
@@ -217,6 +249,22 @@ class Land(QPushButton):
     def to_string(self):
         return f"{self.id} ({self.x}, {self.y})"
 
+    def highlight(self, _type):
+        if _type == "danger":
+            style_sheet = self.danger_style_sheet
+        elif _type == "safe":
+            style_sheet = self.safe_style_sheet
+        else:
+            style_sheet = self.style_sheet
+        color_dict = {
+            " ": "white",
+            "X": "red",
+            "!": "#f02020",
+            "?": "#2020f0",
+        }
+        style_sheet = style_sheet.replace("FONT_COLOR", color_dict[self.cover])
+        self.setStyleSheet(style_sheet)
+
 
 class MineField(QWidget):
     field_width = 0
@@ -231,7 +279,7 @@ class MineField(QWidget):
         self.field_height = min(max(MIN_HEIGHT, field_height), MAX_HEIGHT)
         self.mine_count = min(max(1, mine_count), (self.field_width - 1) * (self.field_height - 1))
         self.init_mine_field()
-    
+
     def init_mine_field(self):
         grid = QGridLayout()
         grid.setSpacing(0)
@@ -318,10 +366,10 @@ class MineField(QWidget):
                     if self.land_list[x + self.field_width * y].have_mine:
                         self.land_list[x + self.field_width * y].cover = SYMBOL_FLAG
                         self.land_list[x + self.field_width * y].update_ui()
-    
+
     def left_click(self):
         self.sender().left_click()
-    
+
     def right_click(self):
         self.sender().right_click()
 
@@ -501,6 +549,7 @@ class MainWindow(QMainWindow):
         self.ai = AI()
         self.ai.result.click.connect(self.ai_click)
         self.ai.result.mark.connect(self.ai_mark)
+        self.ai.result.highlight.connect(self.ai_highlight)
         self.ai.result.emote.connect(self.set_emote)
         self.ai.result.message.connect(self.set_message)
         self.ai.result.ai_finished.connect(self.ai_finished)
@@ -582,7 +631,7 @@ class MainWindow(QMainWindow):
                 "Statistic ...", "Show solving record (TODO)"))
         menu.addAction(
             self.create_menu_action(
-                "&About", "Go to project home page",
+                "&About", "Visit project homepage",
                 trigger=self.about))
 
     def update_title(self):
@@ -710,17 +759,8 @@ class MainWindow(QMainWindow):
         #     print(event.key())
 
         modifiers = QApplication.keyboardModifiers()
-        
-        if event.key() == Qt.Key.Key_Escape:
-            self.close()
-        elif event.key() == Qt.Key.Key_R:
-            if not self.cheat_mode:
-                self.init_mine_field()
-            else:
-                self.mine_field.reset_mine_field()
-                self.game_terminated = False
 
-        elif event.key() == Qt.Key.Key_U:
+        if event.key() == Qt.Key.Key_U:
             new_width = self.mine_field.field_width + 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_width = self.mine_field.field_width + 5
@@ -775,6 +815,10 @@ class MainWindow(QMainWindow):
         land.auto_mark()
         self.ai.result.game_update_completed.emit()  # --> ai
 
+    def ai_highlight(self, land, _type):
+        land.highlight(_type)
+        self.ai.result.game_update_completed.emit()  # --> ai
+
     def ai_finished(self):  # <-- ai
         time_delta = datetime.datetime.now() - self.ai_start_time
         print(f"Usage Time: {time_delta.seconds}.{time_delta.microseconds}")
@@ -803,6 +847,7 @@ class AI(QRunnable):
     class Result(QObject):
         click = Signal(object)  # --> Master
         mark = Signal(object)  # --> Master
+        highlight = Signal(object, str)  # --> Master
         emote = Signal(str)   # --> Master
         message = Signal(str)  # --> Master
 
@@ -855,6 +900,7 @@ class AI(QRunnable):
                 return self.random_click()
             else:
                 print("[AI] No conclusion found.")
+                self.result.message.emit(f"No conclusion found")
                 return False
         land, have_mine = self.analyse_condition()
         if land is not None:
@@ -867,9 +913,11 @@ class AI(QRunnable):
                 if not have_mine:
                     print(f"[AI] ({land.x}, {land.y}) is empty")
                     self.result.message.emit(f"({land.x + 1}, {land.y + 1}) is empty")
+                    self.result.highlight.emit(land, "safe")
                 else:
                     print(f"[AI] ({land.x}, {land.y}) have mine")
                     self.result.message.emit(f"({land.x + 1}, {land.y + 1}) have mine")
+                    self.result.highlight.emit(land, "danger")
             self.result.emote.emit(":D")
             if self.debug_print:
                 for cond in self.condition_list:
@@ -885,12 +933,15 @@ class AI(QRunnable):
                 return self.random_click()
             else:
                 print("[AI] No conclusion found.")
+                self.result.message.emit(f"No conclusion found")
                 return False
-    
+
     def collect_condition(self):
         mine_field = MainWindow().mine_field
         self.condition_list = list()
-        for land in mine_field.land_list:
+        land_list = mine_field.land_list[:]
+        shuffle(land_list)
+        for land in land_list:
             if land.checked and land.adjacent_mine_count != 0:
                 x, y = land.x, land.y
                 condition = {
@@ -929,7 +980,7 @@ class AI(QRunnable):
         x = randint(0, len(land_list) - 1)
         self.result.click.emit(land_list[x])
         return True
-    
+
     def analyse_condition(self):
         while True:
             for condition in self.condition_list:
