@@ -6,8 +6,15 @@ from PySide6.QtWidgets import QWidget, QGridLayout
 from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox
 from random import randint, shuffle
 
+try:
+    from ctypes import windll
+    windll.shell32.SetCurrentProcessExplicitAppUserModelID("Qionglu735.MineSweeperBot.1.0")
+except ImportError:
+    pass
+
 import datetime
 import itertools
+import os
 import sys
 import time
 import webbrowser
@@ -353,6 +360,7 @@ class MineField(QWidget):
     def check_end_game(self, x, y):
         if self.land_list[x + self.field_width * y].have_mine:
             MainWindow().game_terminated = True
+            MainWindow().game_result = "LOSE"
             self.parent().set_message("YOU LOSE")
             for land in self.land_list:
                 if land.have_mine:
@@ -360,6 +368,7 @@ class MineField(QWidget):
                     land.update_ui()
         elif self.revealed_land_count() == self.field_width * self.field_height - self.mine_count:
             MainWindow().game_terminated = True
+            MainWindow().game_result = "WIN"
             self.parent().set_message("YOU WIN")
             for y in range(self.field_height):
                 for x in range(self.field_width):
@@ -523,13 +532,99 @@ class CustomFieldDialog(QDialog):
         self.done(0)
 
 
+class StatisticDialog(QDialog):
+
+    total_count = None
+    win_count, win_rate = None, None
+    lose_count, lose_rate = None, None
+    click_count, click_rate = None, None
+    mark_count, mark_rate = None, None
+    guess_count, guess_rate = None, None
+
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.setWindowTitle("Bot Statistic")
+
+        self.total_count = QLabel("0")
+        self.win_count, self.win_rate = QLabel("0"), QLabel("0")
+        self.lose_count, self.lose_rate = QLabel("0"), QLabel("0")
+        self.click_count, self.click_rate = QLabel("0"), QLabel("0")
+        self.mark_count, self.mark_rate = QLabel("0"), QLabel("0")
+        self.guess_count, self.guess_rate = QLabel("0"), QLabel("0")
+
+        grid = QGridLayout()
+
+        grid.addWidget(QLabel("Count:"), 1, 2)
+        grid.addWidget(QLabel("Rate:"), 1, 3)
+
+        grid.addWidget(QLabel("Total:"), 2, 1)
+        grid.addWidget(self.total_count, 2, 2)
+
+        grid.addWidget(QLabel("Win:"), 3, 1)
+        grid.addWidget(self.win_count, 3, 2)
+        grid.addWidget(self.win_rate, 3, 3)
+
+        grid.addWidget(QLabel("Lose:"), 4, 1)
+        grid.addWidget(self.lose_count, 4, 2)
+        grid.addWidget(self.lose_rate, 4, 3)
+
+        grid.addWidget(QLabel("Click:"), 5, 1)
+        grid.addWidget(self.click_count, 5, 2)
+        grid.addWidget(self.click_rate, 5, 3)
+
+        grid.addWidget(QLabel("Mark:"), 6, 1)
+        grid.addWidget(self.mark_count, 6, 2)
+        grid.addWidget(self.mark_rate, 6, 3)
+
+        grid.addWidget(QLabel("Guess:"), 7, 1)
+        grid.addWidget(self.guess_count, 7, 2)
+        grid.addWidget(self.guess_rate, 7, 3)
+
+        self.setLayout(grid)
+
+    def refresh(self, record_list):
+        print("refresh statistic")
+
+        win = len([r for r in record_list if r["win"] is True])
+        lose = len([r for r in record_list if r["win"] is False])
+        total = max(1, win + lose)
+
+        click = sum([r["click"] for r in record_list if r["win"] in [True, False]])
+        mark = sum([r["mark"] for r in record_list if r["win"] in [True, False]])
+        guess = sum([r["random_click"] for r in record_list if r["win"] in [True, False]])
+        total_op = max(1, click + mark + guess)
+
+        self.total_count.setText(f"{(win + lose): >8}")
+
+        self.win_count.setText(f"{win: >8}")
+        self.win_rate.setText(f"{win / total * 100: >6.2f}%")
+
+        self.lose_count.setText(f"{lose: >8}")
+        self.lose_rate.setText(f"{lose / total * 100: >6.2f}%")
+
+        self.click_count.setText(f"{click: >8}")
+        self.click_rate.setText(f"{click / total_op * 100: >6.2f}%")
+
+        self.mark_count.setText(f"{mark: >8}")
+        self.mark_rate.setText(f"{mark / total_op * 100: >6.2f}%")
+
+        self.guess_count.setText(f"{guess: >8}")
+        self.guess_rate.setText(f"{guess / total_op * 100: >6.2f}%")
+
+        self.update()
+
+
 @singleton
 class MainWindow(QMainWindow):
     mine_field = None
     game_terminated = False
+    game_result = None
     cheat_mode = False
 
     app = None
+    statistic_dialog = None
+
     emote = ""
     menu_action_dict = dict()
     status = ""
@@ -548,6 +643,7 @@ class MainWindow(QMainWindow):
 
         self.ai = AI()
         self.ai.result.click.connect(self.ai_click)
+        self.ai.result.random_click.connect(self.ai_random_click)
         self.ai.result.mark.connect(self.ai_mark)
         self.ai.result.highlight.connect(self.ai_highlight)
         self.ai.result.emote.connect(self.set_emote)
@@ -564,75 +660,80 @@ class MainWindow(QMainWindow):
     def init_window(self):
         self.setWindowFlags(Qt.WindowType.WindowMinimizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
         self.move(700, 1700)
-        icon = QIcon()
-        icon.addPixmap(QPixmap("Mine.ico"))
-        self.setWindowIcon(icon)
+        self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "Mine.ico")))
+
+        self.statistic_dialog = StatisticDialog(self)
 
         menu = self.menuBar()
         # Menu: Game
         game_menu = menu.addMenu("&Game")
         game_menu.addAction(
             self.create_menu_action(
-                "New Game", "New Game", Qt.Key.Key_R, self.re_init_mine_field))
+                "New Game", "New Game",
+                Qt.Key.Key_R, self.menu_re_init_mine_field))
         game_menu.addSeparator()
         # Menu: Game -> Difficulty
         difficulty_menu = game_menu.addMenu("Difficulty")
         difficulty_menu.addAction(
             self.create_menu_action(
                 "Easy", "{} x {} with {} mines".format(*PRESET[0]),
-                Qt.Key.Key_Q, self.init_easy_mine_field))
+                Qt.Key.Key_Q, self.menu_init_easy_mine_field))
         difficulty_menu.addAction(
             self.create_menu_action(
                 "Medium", "{} x {} with {} mines".format(*PRESET[1]),
-                Qt.Key.Key_W, self.init_middle_mine_field))
+                Qt.Key.Key_W, self.menu_init_middle_mine_field))
         difficulty_menu.addAction(
             self.create_menu_action(
                 "Hard", "{} x {} with {} mines".format(*PRESET[2]),
-                Qt.Key.Key_E, self.init_hard_mine_field))
+                Qt.Key.Key_E, self.menu_init_hard_mine_field))
         game_menu.addSeparator()
         difficulty_menu.addAction(
             self.create_menu_action(
                 "Custom...", "Custom field size and mine number",
-                Qt.Key.Key_C, self.custom_mine_field))
+                Qt.Key.Key_C, self.menu_custom_mine_field))
         game_menu.addSeparator()
         game_menu.addAction(
             self.create_menu_action(
-                "Exit", "Exit the game", Qt.Key.Key_Escape, self.app_exit))
+                "Exit", "Exit the game",
+                Qt.Key.Key_Escape, self.menu_app_exit))
         # Menu: Bot
         bot_menu = menu.addMenu("&Bot")
         bot_menu.addAction(
             self.create_menu_action(
                 "Auto Click", "Auto click if empty land found when solving",
-                Qt.Key.Key_A, self.ai_switch_auto_click, check_able=True))
+                Qt.Key.Key_A, self.menu_ai_switch_auto_click, check_able=True))
         bot_menu.addAction(
             self.create_menu_action(
                 "Auto Random Click", "Auto random click if no empty land found when solving",
-                Qt.Key.Key_S, self.ai_switch_auto_random_click, check_able=True))
+                Qt.Key.Key_S, self.menu_ai_switch_auto_random_click, check_able=True))
         bot_menu.addSeparator()
         bot_menu.addAction(
             self.create_menu_action(
                 "Random Click Once", "Auto click a random unmarked land",
-                Qt.Key.Key_D, self.ai_random_click))
+                Qt.Key.Key_D, self.menu_ai_random_click))
         bot_menu.addAction(
             self.create_menu_action(
                 "Solve One Step", "Try to solve current game one step",
-                Qt.Key.Key_F, self.ai_solve_once))
+                Qt.Key.Key_F, self.menu_ai_solve_once))
         bot_menu.addAction(
             self.create_menu_action(
                 "Solve Current Game", "Try to solve current game until win or lose",
-                Qt.Key.Key_G, self.ai_solve))
+                Qt.Key.Key_G, self.menu_ai_solve))
         bot_menu.addAction(
             self.create_menu_action(
                 "Solve Continuously", "Try to solve games continuously",
-                Qt.Key.Key_H, self.ai_solve_looping))
+                Qt.Key.Key_H, self.menu_ai_solve_looping))
         bot_menu.addSeparator()
         bot_menu.addAction(
             self.create_menu_action(
-                "Statistic ...", "Show solving record (TODO)"))
-        menu.addAction(
+                "Statistic...", "Show solving records",
+                Qt.Key.Key_X, trigger=self.menu_statistic))
+        # Menu: About
+        about_menu = menu.addMenu("&About")
+        about_menu.addAction(
             self.create_menu_action(
-                "&About", "Visit project homepage",
-                trigger=self.about))
+                "&About...", "Visit project homepage",
+                trigger=self.menu_about))
 
     def update_title(self):
         field = self.mine_field
@@ -653,7 +754,7 @@ class MainWindow(QMainWindow):
         self.status = msg
         self.update_status_bar()
 
-    def re_init_mine_field(self):
+    def menu_re_init_mine_field(self):
         self.stop_looper()
         if not self.cheat_mode:
             self.init_mine_field()
@@ -661,61 +762,65 @@ class MainWindow(QMainWindow):
             self.mine_field.reset_mine_field()
             self.game_terminated = False
 
-    def init_easy_mine_field(self):
+    def menu_init_easy_mine_field(self):
         self.stop_looper()
         return self.init_mine_field(*PRESET[0])
 
-    def init_middle_mine_field(self):
+    def menu_init_middle_mine_field(self):
         self.stop_looper()
         return self.init_mine_field(*PRESET[1])
 
-    def init_hard_mine_field(self):
+    def menu_init_hard_mine_field(self):
         self.stop_looper()
         return self.init_mine_field(*PRESET[2])
 
-    def custom_mine_field(self):
+    def menu_custom_mine_field(self):
         field_size = self.mine_field.field_size()
         dialog = CustomFieldDialog(
             self, field_size["field_width"], field_size["field_height"], field_size["mine_count"])
         dialog.exec()
 
-    def ai_switch_auto_click(self):
+    def menu_ai_switch_auto_click(self):
         self.stop_looper()
         self.ai.auto_click = not self.ai.auto_click
         print(f"AUTO_CLICK: {self.ai.auto_click}")
 
-    def ai_switch_auto_random_click(self):
+    def menu_ai_switch_auto_random_click(self):
         self.stop_looper()
         self.ai.auto_random_click = not self.ai.auto_random_click
         print(f"AUTO_RAMDOM_CLICK: {self.ai.auto_random_click}")
 
-    def ai_random_click(self):
+    def menu_ai_random_click(self):
         self.stop_looper()
         if not MainWindow().game_terminated:
             self.ai.random_click()
 
-    def ai_solve_once(self):
+    def menu_ai_solve_once(self):
         self.stop_looper()
         if not MainWindow().game_terminated:
             self.start_ai(step=1)
 
-    def ai_solve(self):
+    def menu_ai_solve(self):
         self.stop_looper()
         if not MainWindow().game_terminated:
             self.start_ai()
 
-    def ai_solve_looping(self):
+    def menu_ai_solve_looping(self):
         self.ai_looper.looping = not self.ai_looper.looping
         if self.ai_looper.looping:
             self.start_looper()
         else:
             self.stop_looper()
 
+    def menu_statistic(self):
+        self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
+        self.statistic_dialog.exec()
+
     @staticmethod
-    def about():
+    def menu_about():
         webbrowser.open("https://github.com/Qionglu735/MineSweeperBot")
 
-    def app_exit(self):
+    def menu_app_exit(self):
         sys.exit(self.app.exec())
 
     def create_menu_action(self, title, status_tip, short_cut=None, trigger=None, check_able=None):
@@ -800,7 +905,7 @@ class MainWindow(QMainWindow):
                 land.update_tooltip(self.cheat_mode)
 
     def closeEvent(self, event):
-        self.app_exit()
+        self.menu_app_exit()
 
     def start_ai(self, step=-1):
         self.ai.auto_step = step
@@ -810,10 +915,23 @@ class MainWindow(QMainWindow):
     def ai_click(self, land):  # <-- ai
         land.auto_click()
         self.ai.result.game_update_completed.emit()  # --> ai
+        if self.ai_looper.looping:
+            self.ai_looper.stat.record_click()
+            # self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
+
+    def ai_random_click(self, land):  # <-- ai
+        land.auto_click()
+        self.ai.result.game_update_completed.emit()  # --> ai
+        if self.ai_looper.looping:
+            self.ai_looper.stat.record_random_click()
+            self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
 
     def ai_mark(self, land):  # <-- ai
         land.auto_mark()
         self.ai.result.game_update_completed.emit()  # --> ai
+        if self.ai_looper.looping:
+            self.ai_looper.stat.record_mark()
+            # self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
 
     def ai_highlight(self, land, _type):
         land.highlight(_type)
@@ -824,6 +942,7 @@ class MainWindow(QMainWindow):
         print(f"Usage Time: {time_delta.seconds}.{time_delta.microseconds}")
         if self.ai_looper.looping:
             self.ai_looper.status.ai_finished.emit()  # --> ai_looper
+            self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
 
     def start_looper(self):
         self.ai.auto_click = True
@@ -834,6 +953,7 @@ class MainWindow(QMainWindow):
 
     def stop_looper(self):
         self.ai_looper.status.stop_looping.emit()  # --> ai_looper
+        self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
 
 
 def main():
@@ -846,6 +966,7 @@ def main():
 class AI(QRunnable):
     class Result(QObject):
         click = Signal(object)  # --> Master
+        random_click = Signal(object)  # --> Master
         mark = Signal(object)  # --> Master
         highlight = Signal(object, str)  # --> Master
         emote = Signal(str)   # --> Master
@@ -978,7 +1099,7 @@ class AI(QRunnable):
         if len(land_list) == 0:
             return False
         x = randint(0, len(land_list) - 1)
-        self.result.click.emit(land_list[x])
+        self.result.random_click.emit(land_list[x])
         return True
 
     def analyse_condition(self):
@@ -1074,7 +1195,35 @@ class AILooper(QRunnable):
         ai_finished = Signal()      # Master -->
         stop_looping = Signal()     # Master -->
 
-    status = None
+    class Stat:
+        record_list = list()
+        current = -1
+
+        def create_record(self):
+            record = {
+                "no": len(self.record_list) + 1,
+                "win": None,
+                "click": 0,
+                "mark": 0,
+                "random_click": 0,
+            }
+            self.record_list.append(record)
+            self.current += 1
+
+        def record_click(self):
+            self.record_list[self.current]["click"] += 1
+
+        def record_mark(self):
+            self.record_list[self.current]["mark"] += 1
+
+        def record_random_click(self):
+            self.record_list[self.current]["random_click"] += 1
+
+        def record_game_result(self, game_result):
+            self.record_list[self.current]["win"] = game_result == "WIN"
+            print(self.record_list[self.current])
+
+    stat = None
 
     looping = False
     map_initializing = False
@@ -1087,6 +1236,8 @@ class AILooper(QRunnable):
         self.status.ai_finished.connect(self.ai_finished)
         self.status.stop_looping.connect(self.stop_looping)
 
+        self.stat = AILooper.Stat()
+
     def map_ready(self):
         self.map_initializing = False
 
@@ -1098,6 +1249,7 @@ class AILooper(QRunnable):
 
     @Slot()
     def run(self):
+        self.stat.create_record()
         self.looping = True
         while self.looping:
             # print("[Looper] Start AI")
@@ -1105,15 +1257,24 @@ class AILooper(QRunnable):
             self.status.start_ai.emit()
             while self.ai_running:
                 pass
+            self.stat.record_game_result(MainWindow().game_result)
+            for _ in range(3 * 10):
+                time.sleep(0.1)
+                if not self.looping:
+                    break
+
             if not self.looping:
                 break
-            time.sleep(3)
             # print("[Looper] Init Map")
             self.map_initializing = True
             self.status.init_map.emit()
             while self.map_initializing:
                 pass
-            time.sleep(1)
+            self.stat.create_record()
+            for _ in range(1 * 10):
+                time.sleep(0.1)
+                if not self.looping:
+                    break
 
 
 if __name__ == '__main__':
