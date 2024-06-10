@@ -1,6 +1,6 @@
 
 from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal
-from PySide6.QtGui import QIcon, QPixmap, QAction, QIntValidator
+from PySide6.QtGui import QIcon, QAction, QIntValidator
 from PySide6.QtWidgets import QApplication, QMainWindow, QDialog
 from PySide6.QtWidgets import QWidget, QGridLayout
 from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox
@@ -10,7 +10,7 @@ try:
     from ctypes import windll
     windll.shell32.SetCurrentProcessExplicitAppUserModelID("Qionglu735.MineSweeperBot.1.0")
 except ImportError:
-    pass
+    windll = None
 
 import datetime
 import itertools
@@ -545,6 +545,7 @@ class StatisticDialog(QDialog):
         super().__init__(parent)
 
         self.setWindowTitle("Bot Statistic")
+        self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "Mine.ico")))
 
         self.total_count = QLabel("0")
         self.win_count, self.win_rate = QLabel("0"), QLabel("0")
@@ -553,10 +554,24 @@ class StatisticDialog(QDialog):
         self.mark_count, self.mark_rate = QLabel("0"), QLabel("0")
         self.guess_count, self.guess_rate = QLabel("0"), QLabel("0")
 
+        for label in [
+            self.total_count,
+            self.win_count, self.win_rate,
+            self.lose_count, self.lose_rate,
+            self.click_count, self.click_rate,
+            self.mark_count, self.mark_rate,
+            self.guess_count, self.guess_rate,
+        ]:
+            label.setAlignment(Qt.AlignmentFlag.AlignRight)
+
         grid = QGridLayout()
 
-        grid.addWidget(QLabel("Count:"), 1, 2)
-        grid.addWidget(QLabel("Rate:"), 1, 3)
+        count_label = QLabel("Count:")
+        count_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        grid.addWidget(count_label, 1, 2)
+        rate_label = QLabel("Rate:")
+        rate_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        grid.addWidget(rate_label, 1, 3)
 
         grid.addWidget(QLabel("Total:"), 2, 1)
         grid.addWidget(self.total_count, 2, 2)
@@ -584,33 +599,32 @@ class StatisticDialog(QDialog):
         self.setLayout(grid)
 
     def refresh(self, record_list):
-        print("refresh statistic")
 
         win = len([r for r in record_list if r["win"] is True])
         lose = len([r for r in record_list if r["win"] is False])
         total = max(1, win + lose)
 
-        click = sum([r["click"] for r in record_list if r["win"] in [True, False]])
-        mark = sum([r["mark"] for r in record_list if r["win"] in [True, False]])
-        guess = sum([r["random_click"] for r in record_list if r["win"] in [True, False]])
+        click = sum([r["click"] for r in record_list])
+        mark = sum([r["mark"] for r in record_list])
+        guess = sum([r["random_click"] for r in record_list])
         total_op = max(1, click + mark + guess)
 
-        self.total_count.setText(f"{(win + lose): >8}")
+        self.total_count.setText(f"{(win + lose)}")
 
-        self.win_count.setText(f"{win: >8}")
-        self.win_rate.setText(f"{win / total * 100: >6.2f}%")
+        self.win_count.setText(f"{win}")
+        self.win_rate.setText(f"{win / total * 100:.2f}%")
 
-        self.lose_count.setText(f"{lose: >8}")
-        self.lose_rate.setText(f"{lose / total * 100: >6.2f}%")
+        self.lose_count.setText(f"{lose}")
+        self.lose_rate.setText(f"{lose / total * 100:.2f}%")
 
-        self.click_count.setText(f"{click: >8}")
-        self.click_rate.setText(f"{click / total_op * 100: >6.2f}%")
+        self.click_count.setText(f"{click}")
+        self.click_rate.setText(f"{click / total_op * 100:.2f}%")
 
-        self.mark_count.setText(f"{mark: >8}")
-        self.mark_rate.setText(f"{mark / total_op * 100: >6.2f}%")
+        self.mark_count.setText(f"{mark}")
+        self.mark_rate.setText(f"{mark / total_op * 100:.2f}%")
 
-        self.guess_count.setText(f"{guess: >8}")
-        self.guess_rate.setText(f"{guess / total_op * 100: >6.2f}%")
+        self.guess_count.setText(f"{guess}")
+        self.guess_rate.setText(f"{guess / total_op * 100:.2f}%")
 
         self.update()
 
@@ -659,7 +673,11 @@ class MainWindow(QMainWindow):
 
     def init_window(self):
         self.setWindowFlags(Qt.WindowType.WindowMinimizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
-        self.move(700, 1700)
+        # self.move(700, 1700)
+        self.move(
+            int(QApplication.primaryScreen().size().width() * 0.3),
+            int(QApplication.primaryScreen().size().height() * 0.7),
+        )
         self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "Mine.ico")))
 
         self.statistic_dialog = StatisticDialog(self)
@@ -814,7 +832,8 @@ class MainWindow(QMainWindow):
 
     def menu_statistic(self):
         self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
-        self.statistic_dialog.exec()
+        self.statistic_dialog.move(self.geometry().x() - 170, self.geometry().y())
+        self.statistic_dialog.show()
 
     @staticmethod
     def menu_about():
@@ -917,7 +936,7 @@ class MainWindow(QMainWindow):
         self.ai.result.game_update_completed.emit()  # --> ai
         if self.ai_looper.looping:
             self.ai_looper.stat.record_click()
-            # self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
+            self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
 
     def ai_random_click(self, land):  # <-- ai
         land.auto_click()
@@ -931,7 +950,7 @@ class MainWindow(QMainWindow):
         self.ai.result.game_update_completed.emit()  # --> ai
         if self.ai_looper.looping:
             self.ai_looper.stat.record_mark()
-            # self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
+            self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
 
     def ai_highlight(self, land, _type):
         land.highlight(_type)
@@ -942,6 +961,7 @@ class MainWindow(QMainWindow):
         print(f"Usage Time: {time_delta.seconds}.{time_delta.microseconds}")
         if self.ai_looper.looping:
             self.ai_looper.status.ai_finished.emit()  # --> ai_looper
+            self.ai_looper.stat.record_game_result(MainWindow().game_result)
             self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
 
     def start_looper(self):
@@ -1018,7 +1038,7 @@ class AI(QRunnable):
         if len(self.condition_list) == 0:
             self.result.emote.emit(":(")
             if self.auto_click:
-                return self.random_click()
+                return self.random_click(is_first_click=True)
             else:
                 print("[AI] No conclusion found.")
                 self.result.message.emit(f"No conclusion found")
@@ -1092,14 +1112,17 @@ class AI(QRunnable):
                     "adj_land": [land.to_string() for land in cond["adj_land"]],
                 })
 
-    def random_click(self):
+    def random_click(self, is_first_click=False):
         print("[AI] Random Click")
         mine_field = MainWindow().mine_field
         land_list = [land for land in mine_field.land_list if not land.checked and land.cover == SYMBOL_BLANK]
         if len(land_list) == 0:
             return False
         x = randint(0, len(land_list) - 1)
-        self.result.random_click.emit(land_list[x])
+        if is_first_click:
+            self.result.click.emit(land_list[x])
+        else:
+            self.result.random_click.emit(land_list[x])
         return True
 
     def analyse_condition(self):
@@ -1257,7 +1280,6 @@ class AILooper(QRunnable):
             self.status.start_ai.emit()
             while self.ai_running:
                 pass
-            self.stat.record_game_result(MainWindow().game_result)
             for _ in range(3 * 10):
                 time.sleep(0.1)
                 if not self.looping:
