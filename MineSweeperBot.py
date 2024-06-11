@@ -643,10 +643,10 @@ class MainWindow(QMainWindow):
     menu_action_dict = dict()
     status = ""
 
-    ai = None
-    ai_looper = None
-    ai_pool = None
-    ai_start_time = None
+    bot = None
+    bot_looper = None
+    bot_pool = None
+    bot_start_time = None
 
     def __init__(self, app):
         super().__init__()
@@ -655,21 +655,21 @@ class MainWindow(QMainWindow):
 
         self.init_mine_field()
 
-        self.ai = AI()
-        self.ai.result.click.connect(self.ai_click)
-        self.ai.result.random_click.connect(self.ai_random_click)
-        self.ai.result.mark.connect(self.ai_mark)
-        self.ai.result.highlight.connect(self.ai_highlight)
-        self.ai.result.emote.connect(self.set_emote)
-        self.ai.result.message.connect(self.set_message)
-        self.ai.result.ai_finished.connect(self.ai_finished)
+        self.bot = Bot()
+        self.bot.result.click.connect(self.bot_click)
+        self.bot.result.random_click.connect(self.bot_random_click)
+        self.bot.result.mark.connect(self.bot_mark)
+        self.bot.result.highlight.connect(self.bot_highlight)
+        self.bot.result.emote.connect(self.set_emote)
+        self.bot.result.message.connect(self.set_message)
+        self.bot.result.bot_finished.connect(self.bot_finished)
 
-        self.ai_looper = AILooper()
-        self.ai_looper.status.init_map.connect(self.init_mine_field)
-        self.ai_looper.status.start_ai.connect(self.start_ai)
+        self.bot_looper = BotLooper()
+        self.bot_looper.status.init_map.connect(self.init_mine_field)
+        self.bot_looper.status.start_bot.connect(self.start_bot)
 
-        self.ai_pool = QThreadPool()
-        self.ai_pool.setMaxThreadCount(20)
+        self.bot_pool = QThreadPool()
+        self.bot_pool.setMaxThreadCount(20)
 
     def init_window(self):
         self.setWindowFlags(Qt.WindowType.WindowMinimizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
@@ -718,28 +718,28 @@ class MainWindow(QMainWindow):
         bot_menu.addAction(
             self.create_menu_action(
                 "Auto Click", "Auto click if empty land found when solving",
-                Qt.Key.Key_A, self.menu_ai_switch_auto_click, check_able=True))
+                Qt.Key.Key_A, self.menu_bot_switch_auto_click, check_able=True))
         bot_menu.addAction(
             self.create_menu_action(
                 "Auto Random Click", "Auto random click if no empty land found when solving",
-                Qt.Key.Key_S, self.menu_ai_switch_auto_random_click, check_able=True))
+                Qt.Key.Key_S, self.menu_bot_switch_auto_random_click, check_able=True))
         bot_menu.addSeparator()
         bot_menu.addAction(
             self.create_menu_action(
                 "Random Click Once", "Auto click a random unmarked land",
-                Qt.Key.Key_D, self.menu_ai_random_click))
+                Qt.Key.Key_D, self.menu_bot_random_click))
         bot_menu.addAction(
             self.create_menu_action(
                 "Solve One Step", "Try to solve current game one step",
-                Qt.Key.Key_F, self.menu_ai_solve_once))
+                Qt.Key.Key_F, self.menu_bot_solve_once))
         bot_menu.addAction(
             self.create_menu_action(
                 "Solve Current Game", "Try to solve current game until win or lose",
-                Qt.Key.Key_G, self.menu_ai_solve))
+                Qt.Key.Key_G, self.menu_bot_solve))
         bot_menu.addAction(
             self.create_menu_action(
                 "Solve Continuously", "Try to solve games continuously",
-                Qt.Key.Key_H, self.menu_ai_solve_looping))
+                Qt.Key.Key_H, self.menu_bot_solve_looping))
         bot_menu.addSeparator()
         bot_menu.addAction(
             self.create_menu_action(
@@ -797,40 +797,40 @@ class MainWindow(QMainWindow):
             self, field_size["field_width"], field_size["field_height"], field_size["mine_count"])
         dialog.exec()
 
-    def menu_ai_switch_auto_click(self):
+    def menu_bot_switch_auto_click(self):
         self.stop_looper()
-        self.ai.auto_click = not self.ai.auto_click
-        print(f"AUTO_CLICK: {self.ai.auto_click}")
+        self.bot.auto_click = not self.bot.auto_click
+        print(f"AUTO_CLICK: {self.bot.auto_click}")
 
-    def menu_ai_switch_auto_random_click(self):
+    def menu_bot_switch_auto_random_click(self):
         self.stop_looper()
-        self.ai.auto_random_click = not self.ai.auto_random_click
-        print(f"AUTO_RAMDOM_CLICK: {self.ai.auto_random_click}")
+        self.bot.auto_random_click = not self.bot.auto_random_click
+        print(f"AUTO_RAMDOM_CLICK: {self.bot.auto_random_click}")
 
-    def menu_ai_random_click(self):
-        self.stop_looper()
-        if not MainWindow().game_terminated:
-            self.ai.random_click()
-
-    def menu_ai_solve_once(self):
+    def menu_bot_random_click(self):
         self.stop_looper()
         if not MainWindow().game_terminated:
-            self.start_ai(step=1)
+            self.bot.random_click()
 
-    def menu_ai_solve(self):
+    def menu_bot_solve_once(self):
         self.stop_looper()
         if not MainWindow().game_terminated:
-            self.start_ai()
+            self.start_bot(step=1)
 
-    def menu_ai_solve_looping(self):
-        self.ai_looper.looping = not self.ai_looper.looping
-        if self.ai_looper.looping:
+    def menu_bot_solve(self):
+        self.stop_looper()
+        if not MainWindow().game_terminated:
+            self.start_bot()
+
+    def menu_bot_solve_looping(self):
+        self.bot_looper.looping = not self.bot_looper.looping
+        if self.bot_looper.looping:
             self.start_looper()
         else:
             self.stop_looper()
 
     def menu_statistic(self):
-        self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
+        self.statistic_dialog.refresh(self.bot_looper.stat.record_list)
         self.statistic_dialog.move(self.geometry().x() - 170, self.geometry().y())
         self.statistic_dialog.show()
 
@@ -872,8 +872,8 @@ class MainWindow(QMainWindow):
         self.set_emote("")
         self.set_message("New Game Ready")
 
-        if self.ai_looper is not None and self.ai_looper.looping:
-            self.ai_looper.status.map_ready.emit()  # --> ai_looper
+        if self.bot_looper is not None and self.bot_looper.looping:
+            self.bot_looper.status.map_ready.emit()  # --> bot_looper
 
     def keyPressEvent(self, event):
         # if event.key() < 256:
@@ -925,63 +925,63 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.menu_app_exit()
 
-    def start_ai(self, step=-1):
-        self.ai.auto_step = step
-        self.ai_start_time = datetime.datetime.now()
-        self.ai_pool.start(self.ai)
+    def start_bot(self, step=-1):
+        self.bot.auto_step = step
+        self.bot_start_time = datetime.datetime.now()
+        self.bot_pool.start(self.bot)
 
-    def ai_click(self, land):  # <-- ai
+    def bot_click(self, land):  # <-- bot
         land.auto_click()
-        self.ai.result.game_update_completed.emit()  # --> ai
-        if self.ai_looper.looping:
-            self.ai_looper.stat.record_click()
-            self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
+        self.bot.result.game_update_completed.emit()  # --> bot
+        if self.bot_looper.looping:
+            self.bot_looper.stat.record_click()
+            self.statistic_dialog.refresh(self.bot_looper.stat.record_list)
 
-    def ai_random_click(self, land):  # <-- ai
+    def bot_random_click(self, land):  # <-- bot
         land.auto_click()
-        self.ai.result.game_update_completed.emit()  # --> ai
-        if self.ai_looper.looping:
-            self.ai_looper.stat.record_random_click()
-            self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
+        self.bot.result.game_update_completed.emit()  # --> bot
+        if self.bot_looper.looping:
+            self.bot_looper.stat.record_random_click()
+            self.statistic_dialog.refresh(self.bot_looper.stat.record_list)
 
-    def ai_mark(self, land):  # <-- ai
+    def bot_mark(self, land):  # <-- bot
         land.auto_mark()
-        self.ai.result.game_update_completed.emit()  # --> ai
-        if self.ai_looper.looping:
-            self.ai_looper.stat.record_mark()
-            self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
+        self.bot.result.game_update_completed.emit()  # --> bot
+        if self.bot_looper.looping:
+            self.bot_looper.stat.record_mark()
+            self.statistic_dialog.refresh(self.bot_looper.stat.record_list)
 
-    def ai_highlight(self, land, _type):
+    def bot_highlight(self, land, _type):
         land.highlight(_type)
-        self.ai.result.game_update_completed.emit()  # --> ai
+        self.bot.result.game_update_completed.emit()  # --> bot
 
-    def ai_finished(self):  # <-- ai
-        time_delta = datetime.datetime.now() - self.ai_start_time
+    def bot_finished(self):  # <-- bot
+        time_delta = datetime.datetime.now() - self.bot_start_time
         print(f"Usage Time: {time_delta.seconds}.{time_delta.microseconds}")
-        self.ai_looper.status.ai_finished.emit()  # --> ai_looper
-        if self.ai_looper.looping:
-            self.ai_looper.stat.record_game_result(MainWindow().game_result)
-            self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
+        self.bot_looper.status.bot_finished.emit()  # --> bot_looper
+        if self.bot_looper.looping:
+            self.bot_looper.stat.record_game_result(MainWindow().game_result)
+            self.statistic_dialog.refresh(self.bot_looper.stat.record_list)
 
     def start_looper(self):
-        self.ai.auto_click = True
+        self.bot.auto_click = True
         self.menu_action_dict["Auto Click"].setChecked(True)
-        self.ai.auto_random_click = True
+        self.bot.auto_random_click = True
         self.menu_action_dict["Auto Random Click"].setChecked(True)
         try:
-            self.ai_pool.start(self.ai_looper)
+            self.bot_pool.start(self.bot_looper)
         except RuntimeError:
-            self.ai_looper = AILooper()
-            self.ai_looper.status.init_map.connect(self.init_mine_field)
-            self.ai_looper.status.start_ai.connect(self.start_ai)
-            self.ai_pool.start(self.ai_looper)
+            self.bot_looper = BotLooper()
+            self.bot_looper.status.init_map.connect(self.init_mine_field)
+            self.bot_looper.status.start_bot.connect(self.start_bot)
+            self.bot_pool.start(self.bot_looper)
 
     def stop_looper(self):
-        if self.ai_looper is not None and self.ai_looper.looping:
-            self.ai_looper.status.stop_looping.emit()  # --> ai_looper
-            self.ai.result.stop_solving.emit()  # --> ai
-            self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
-            while self.ai_looper.looping:
+        if self.bot_looper is not None and self.bot_looper.looping:
+            self.bot_looper.status.stop_looping.emit()  # --> bot_looper
+            self.bot.result.stop_solving.emit()  # --> bot
+            self.statistic_dialog.refresh(self.bot_looper.stat.record_list)
+            while self.bot_looper.looping:
                 pass
 
 
@@ -992,7 +992,7 @@ def main():
     sys.exit(app.exec())
 
 
-class AI(QRunnable):
+class Bot(QRunnable):
     class Result(QObject):
         click = Signal(object)  # --> Master
         random_click = Signal(object)  # --> Master
@@ -1003,7 +1003,7 @@ class AI(QRunnable):
 
         game_update_completed = Signal()  # Master ->
         stop_solving = Signal()  # Master ->
-        ai_finished = Signal()  # Master ->
+        bot_finished = Signal()  # Master ->
 
     auto_click = False
     auto_random_click = False
@@ -1019,7 +1019,7 @@ class AI(QRunnable):
     def __init__(self):
         super().__init__()
         self.setAutoDelete(False)
-        self.result = AI.Result()
+        self.result = Bot.Result()
         self.result.game_update_completed.connect(self.game_update_completed)
         self.result.stop_solving.connect(self.stop_solving)
 
@@ -1046,17 +1046,17 @@ class AI(QRunnable):
                 # wait until game update completed
                 pass
         self.auto_solving = False
-        self.result.ai_finished.emit()
+        self.result.bot_finished.emit()
 
     def solve(self):
         self.collect_condition()
-        # print("[AI]Try to analyse ...")
+        # print("[Bot]Try to analyse ...")
         if len(self.condition_list) == 0:
             self.result.emote.emit(":(")
             if self.auto_click:
                 return self.random_click(is_first_click=True)
             else:
-                print("[AI] No conclusion found.")
+                print("[Bot] No conclusion found.")
                 self.result.message.emit(f"No conclusion found")
                 return False
         land, have_mine = self.analyse_condition()
@@ -1068,11 +1068,11 @@ class AI(QRunnable):
                     self.result.mark.emit(land)
             else:
                 if not have_mine:
-                    print(f"[AI] ({land.x}, {land.y}) is empty")
+                    print(f"[Bot] ({land.x}, {land.y}) is empty")
                     self.result.message.emit(f"({land.x + 1}, {land.y + 1}) is empty")
                     self.result.highlight.emit(land, "safe")
                 else:
-                    print(f"[AI] ({land.x}, {land.y}) have mine")
+                    print(f"[Bot] ({land.x}, {land.y}) have mine")
                     self.result.message.emit(f"({land.x + 1}, {land.y + 1}) have mine")
                     self.result.highlight.emit(land, "danger")
             self.result.emote.emit(":D")
@@ -1089,7 +1089,7 @@ class AI(QRunnable):
             if self.auto_random_click:
                 return self.random_click()
             else:
-                print("[AI] No conclusion found.")
+                print("[Bot] No conclusion found.")
                 self.result.message.emit(f"No conclusion found")
                 return False
 
@@ -1129,7 +1129,7 @@ class AI(QRunnable):
                 })
 
     def random_click(self, is_first_click=False):
-        print("[AI] Random Click")
+        print("[Bot] Random Click")
         mine_field = MainWindow().mine_field
         land_list = [land for land in mine_field.land_list if not land.checked and land.cover == SYMBOL_BLANK]
         if len(land_list) == 0:
@@ -1226,12 +1226,12 @@ class AI(QRunnable):
             return _b, list(), _b
 
 
-class AILooper(QRunnable):
+class BotLooper(QRunnable):
     class Status(QObject):
         init_map = Signal()         # --> Master
         map_ready = Signal()        # Master -->
-        start_ai = Signal()         # --> Master
-        ai_finished = Signal()      # Master -->
+        start_bot = Signal()         # --> Master
+        bot_finished = Signal()      # Master -->
         stop_looping = Signal()     # Master -->
 
     class Stat:
@@ -1266,22 +1266,22 @@ class AILooper(QRunnable):
 
     looping = False
     map_initializing = False
-    ai_running = False
+    bot_running = False
 
     def __init__(self):
         super().__init__()
-        self.status = AILooper.Status()
+        self.status = BotLooper.Status()
         self.status.map_ready.connect(self.map_ready)
-        self.status.ai_finished.connect(self.ai_finished)
+        self.status.bot_finished.connect(self.bot_finished)
         self.status.stop_looping.connect(self.stop_looping)
 
-        self.stat = AILooper.Stat()
+        self.stat = BotLooper.Stat()
 
     def map_ready(self):
         self.map_initializing = False
 
-    def ai_finished(self):
-        self.ai_running = False
+    def bot_finished(self):
+        self.bot_running = False
 
     def stop_looping(self):
         self.looping = False
@@ -1291,10 +1291,10 @@ class AILooper(QRunnable):
         self.stat.create_record()
         self.looping = True
         while self.looping:
-            # print("[Looper] Start AI")
-            self.ai_running = True
-            self.status.start_ai.emit()
-            while self.ai_running:
+            # print("[Looper] Start Bot")
+            self.bot_running = True
+            self.status.start_bot.emit()
+            while self.bot_running:
                 pass
             for _ in range(3 * 10):
                 time.sleep(0.1)
