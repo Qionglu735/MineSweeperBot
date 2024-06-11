@@ -820,6 +820,8 @@ class MainWindow(QMainWindow):
     def menu_bot_solve(self):
         self.stop_looper()
         if not MainWindow().game_terminated:
+            self.bot.auto_click = True
+            self.menu_action_dict["Auto Click"].setChecked(True)
             self.start_bot()
 
     def menu_bot_solve_looping(self):
