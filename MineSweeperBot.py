@@ -673,10 +673,9 @@ class MainWindow(QMainWindow):
 
     def init_window(self):
         self.setWindowFlags(Qt.WindowType.WindowMinimizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
-        # self.move(700, 1700)
         self.move(
             int(QApplication.primaryScreen().size().width() * 0.3),
-            int(QApplication.primaryScreen().size().height() * 0.7),
+            int(QApplication.primaryScreen().size().height() * 0.8),
         )
         self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "Mine.ico")))
 
@@ -959,8 +958,8 @@ class MainWindow(QMainWindow):
     def ai_finished(self):  # <-- ai
         time_delta = datetime.datetime.now() - self.ai_start_time
         print(f"Usage Time: {time_delta.seconds}.{time_delta.microseconds}")
+        self.ai_looper.status.ai_finished.emit()  # --> ai_looper
         if self.ai_looper.looping:
-            self.ai_looper.status.ai_finished.emit()  # --> ai_looper
             self.ai_looper.stat.record_game_result(MainWindow().game_result)
             self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
 
@@ -969,11 +968,21 @@ class MainWindow(QMainWindow):
         self.menu_action_dict["Auto Click"].setChecked(True)
         self.ai.auto_random_click = True
         self.menu_action_dict["Auto Random Click"].setChecked(True)
-        self.ai_pool.start(self.ai_looper)
+        try:
+            self.ai_pool.start(self.ai_looper)
+        except RuntimeError:
+            self.ai_looper = AILooper()
+            self.ai_looper.status.init_map.connect(self.init_mine_field)
+            self.ai_looper.status.start_ai.connect(self.start_ai)
+            self.ai_pool.start(self.ai_looper)
 
     def stop_looper(self):
-        self.ai_looper.status.stop_looping.emit()  # --> ai_looper
-        self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
+        if self.ai_looper is not None and self.ai_looper.looping:
+            self.ai_looper.status.stop_looping.emit()  # --> ai_looper
+            self.ai.result.stop_solving.emit()  # --> ai
+            self.statistic_dialog.refresh(self.ai_looper.stat.record_list)
+            while self.ai_looper.looping:
+                pass
 
 
 def main():
@@ -993,7 +1002,7 @@ class AI(QRunnable):
         message = Signal(str)  # --> Master
 
         game_update_completed = Signal()  # Master ->
-        game_terminated = Signal()  # Master ->
+        stop_solving = Signal()  # Master ->
         ai_finished = Signal()  # Master ->
 
     auto_click = False
@@ -1012,11 +1021,15 @@ class AI(QRunnable):
         self.setAutoDelete(False)
         self.result = AI.Result()
         self.result.game_update_completed.connect(self.game_update_completed)
+        self.result.stop_solving.connect(self.stop_solving)
 
     def game_update_completed(self):
         if MainWindow().game_terminated:
             self.auto_solving = False
         self.game_updating = False
+
+    def stop_solving(self):
+        self.auto_solving = False
 
     @Slot()
     def run(self):
@@ -1024,12 +1037,15 @@ class AI(QRunnable):
         self.game_updating = False
         while self.auto_solving and self.auto_step != 0:
             self.game_updating = True
-            self.auto_solving = self.solve()
+            solve_success = self.solve()
+            if not solve_success:
+                break
             if self.auto_step > 0:
                 self.auto_step -= 1
             while self.auto_solving and self.auto_step != 0 and self.game_updating:
                 # wait until game update completed
                 pass
+        self.auto_solving = False
         self.result.ai_finished.emit()
 
     def solve(self):
