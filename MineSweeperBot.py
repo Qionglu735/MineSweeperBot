@@ -3,7 +3,7 @@ from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal
 from PySide6.QtGui import QIcon, QAction, QIntValidator
 from PySide6.QtWidgets import QApplication, QMainWindow, QDialog
 from PySide6.QtWidgets import QWidget, QGridLayout
-from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox
+from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox, QFrame
 from random import randint, shuffle
 
 try:
@@ -303,6 +303,9 @@ class MineField(QWidget):
 
         self.setLayout(grid)
 
+        self.parent().setFixedWidth(20 + self.field_width * BUTTON_SIZE)
+        self.parent().setFixedHeight(61 + self.field_height * BUTTON_SIZE)
+
     def reset_mine_field(self):
         for land in self.land_list:
             land.cover = SYMBOL_BLANK
@@ -540,12 +543,19 @@ class StatisticDialog(QDialog):
     click_count, click_rate = None, None
     mark_count, mark_rate = None, None
     guess_count, guess_rate = None, None
+    usage_time_avg = None
+    cur_click_count, cur_click_rate = None, None
+    cur_mark_count, cur_mark_rate = None, None
+    cur_guess_count, cur_guess_rate  = None, None
+    cur_usage_time = None
+    cur_result = None
 
     def __init__(self, parent):
         super().__init__(parent)
 
         self.setWindowTitle("Bot Statistic")
         self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "Mine.ico")))
+        self.setFixedSize(190, 300)
 
         self.total_count = QLabel("0")
         self.win_count, self.win_rate = QLabel("0"), QLabel("0")
@@ -553,6 +563,12 @@ class StatisticDialog(QDialog):
         self.click_count, self.click_rate = QLabel("0"), QLabel("0")
         self.mark_count, self.mark_rate = QLabel("0"), QLabel("0")
         self.guess_count, self.guess_rate = QLabel("0"), QLabel("0")
+        self.usage_time_avg = QLabel("0")
+        self.cur_click_count, self.cur_click_rate = QLabel("0"), QLabel("0")
+        self.cur_mark_count, self.cur_mark_rate = QLabel("0"), QLabel("0")
+        self.cur_guess_count, self.cur_guess_rate = QLabel("0"), QLabel("0")
+        self.cur_usage_time = QLabel("0")
+        self.cur_result = QLabel("")
 
         for label in [
             self.total_count,
@@ -561,6 +577,12 @@ class StatisticDialog(QDialog):
             self.click_count, self.click_rate,
             self.mark_count, self.mark_rate,
             self.guess_count, self.guess_rate,
+            self.usage_time_avg,
+            self.cur_click_count, self.cur_click_rate,
+            self.cur_mark_count, self.cur_mark_rate,
+            self.cur_guess_count, self.cur_guess_rate,
+            self.cur_usage_time,
+            self.cur_result,
         ]:
             label.setAlignment(Qt.AlignmentFlag.AlignRight)
 
@@ -596,6 +618,32 @@ class StatisticDialog(QDialog):
         grid.addWidget(self.guess_count, 7, 2)
         grid.addWidget(self.guess_rate, 7, 3)
 
+        grid.addWidget(QLabel("Avg. Usage Time:"), 8, 1, 1, 2)
+        grid.addWidget(self.usage_time_avg, 8, 3)
+
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        grid.addWidget(line, 9, 1, 1, 3)
+
+        grid.addWidget(QLabel("Cur. Status:"), 10, 1, 1, 2)
+        grid.addWidget(self.cur_result, 10, 3)
+
+        grid.addWidget(QLabel("Cur. Click:"), 11, 1)
+        grid.addWidget(self.cur_click_count, 11, 2)
+        grid.addWidget(self.cur_click_rate, 11, 3)
+
+        grid.addWidget(QLabel("Cur. Mark:"), 12, 1)
+        grid.addWidget(self.cur_mark_count, 12, 2)
+        grid.addWidget(self.cur_mark_rate, 12, 3)
+
+        grid.addWidget(QLabel("Cur. Guess:"), 13, 1)
+        grid.addWidget(self.cur_guess_count, 13, 2)
+        grid.addWidget(self.cur_guess_rate, 13, 3)
+
+        grid.addWidget(QLabel("Cur. Usage Time:"), 14, 1, 1, 2)
+        grid.addWidget(self.cur_usage_time, 14, 3)
+
         self.setLayout(grid)
 
     def refresh(self, record_list):
@@ -608,6 +656,7 @@ class StatisticDialog(QDialog):
         mark = sum([r["mark"] for r in record_list])
         guess = sum([r["random_click"] for r in record_list])
         total_op = max(1, click + mark + guess)
+        total_time = sum([r["usage_time"] for r in record_list])
 
         self.total_count.setText(f"{(win + lose)}")
 
@@ -626,7 +675,34 @@ class StatisticDialog(QDialog):
         self.guess_count.setText(f"{guess}")
         self.guess_rate.setText(f"{guess / total_op * 100:.2f}%")
 
-        self.update()
+        self.usage_time_avg.setText(f"{total_time / total:.6f}")
+
+        if len(record_list) > 0:
+            time_delta = datetime.datetime.now() - record_list[-1]["start_time"]
+            cur_click = record_list[-1]["click"]
+            cur_mark = record_list[-1]["mark"]
+            cur_guess = record_list[-1]["random_click"]
+            cur_total_op = max(1, cur_click + cur_mark + cur_guess)
+
+            self.cur_click_count.setText(f"{cur_click}")
+            self.cur_click_rate.setText(f"{cur_click / cur_total_op * 100:.2f}%")
+
+            self.cur_mark_count.setText(f"{cur_mark}")
+            self.cur_mark_rate.setText(f"{cur_mark / cur_total_op * 100:.2f}%")
+
+            self.cur_guess_count.setText(f"{cur_guess}")
+            self.cur_guess_rate.setText(f"{cur_guess / cur_total_op * 100:.2f}%")
+
+            self.cur_usage_time.setText(f"{time_delta.seconds}.{time_delta.microseconds}")
+
+            if record_list[-1]["win"] is True:
+                self.cur_result.setText("WIN")
+            elif record_list[-1]["win"] is False:
+                self.cur_result.setText("LOSE")
+            else:
+                self.cur_result.setText("solving")
+
+        # self.update()
 
 
 @singleton
@@ -644,14 +720,17 @@ class MainWindow(QMainWindow):
     status = ""
 
     bot = None
+    bot_start_time = None
     bot_looper = None
     bot_pool = None
-    bot_start_time = None
+    bot_stat = None
 
     def __init__(self, app):
         super().__init__()
         self.app = app
         self.init_window()
+
+        self.bot_stat = BotStat()
 
         self.init_mine_field()
 
@@ -822,6 +901,7 @@ class MainWindow(QMainWindow):
         if not MainWindow().game_terminated:
             self.bot.auto_click = True
             self.menu_action_dict["Auto Click"].setChecked(True)
+            self.bot_stat.create_record()
             self.start_bot()
 
     def menu_bot_solve_looping(self):
@@ -832,8 +912,8 @@ class MainWindow(QMainWindow):
             self.stop_looper()
 
     def menu_statistic(self):
-        self.statistic_dialog.refresh(self.bot_looper.stat.record_list)
-        self.statistic_dialog.move(self.geometry().x() - 170, self.geometry().y())
+        self.statistic_dialog.refresh(self.bot_stat.record_list)
+        self.statistic_dialog.move(self.geometry().x() - 200, self.geometry().y() - 30)
         self.statistic_dialog.show()
 
     @staticmethod
@@ -929,41 +1009,36 @@ class MainWindow(QMainWindow):
 
     def start_bot(self, step=-1):
         self.bot.auto_step = step
-        self.bot_start_time = datetime.datetime.now()
+        if step == -1:
+            self.bot_stat.create_record()
         self.bot_pool.start(self.bot)
 
     def bot_click(self, land):  # <-- bot
         land.auto_click()
         self.bot.result.game_update_completed.emit()  # --> bot
-        if self.bot_looper.looping:
-            self.bot_looper.stat.record_click()
-            self.statistic_dialog.refresh(self.bot_looper.stat.record_list)
+        self.bot_stat.record_click()
+        self.statistic_dialog.refresh(self.bot_stat.record_list)
 
     def bot_random_click(self, land):  # <-- bot
         land.auto_click()
         self.bot.result.game_update_completed.emit()  # --> bot
-        if self.bot_looper.looping:
-            self.bot_looper.stat.record_random_click()
-            self.statistic_dialog.refresh(self.bot_looper.stat.record_list)
+        self.bot_stat.record_random_click()
+        self.statistic_dialog.refresh(self.bot_stat.record_list)
 
     def bot_mark(self, land):  # <-- bot
         land.auto_mark()
         self.bot.result.game_update_completed.emit()  # --> bot
-        if self.bot_looper.looping:
-            self.bot_looper.stat.record_mark()
-            self.statistic_dialog.refresh(self.bot_looper.stat.record_list)
+        self.bot_stat.record_mark()
+        self.statistic_dialog.refresh(self.bot_stat.record_list)
 
     def bot_highlight(self, land, _type):
         land.highlight(_type)
         self.bot.result.game_update_completed.emit()  # --> bot
 
     def bot_finished(self):  # <-- bot
-        time_delta = datetime.datetime.now() - self.bot_start_time
-        print(f"Usage Time: {time_delta.seconds}.{time_delta.microseconds}")
         self.bot_looper.status.bot_finished.emit()  # --> bot_looper
-        if self.bot_looper.looping:
-            self.bot_looper.stat.record_game_result(MainWindow().game_result)
-            self.statistic_dialog.refresh(self.bot_looper.stat.record_list)
+        self.bot_stat.record_game_result(MainWindow().game_result)
+        self.statistic_dialog.refresh(self.bot_stat.record_list)
 
     def start_looper(self):
         self.bot.auto_click = True
@@ -982,7 +1057,7 @@ class MainWindow(QMainWindow):
         if self.bot_looper is not None and self.bot_looper.looping:
             self.bot_looper.status.stop_looping.emit()  # --> bot_looper
             self.bot.result.stop_solving.emit()  # --> bot
-            self.statistic_dialog.refresh(self.bot_looper.stat.record_list)
+            self.statistic_dialog.refresh(self.bot_stat.record_list)
             while self.bot_looper.looping:
                 pass
 
@@ -1236,36 +1311,6 @@ class BotLooper(QRunnable):
         bot_finished = Signal()      # Master -->
         stop_looping = Signal()     # Master -->
 
-    class Stat:
-        record_list = list()
-        current = -1
-
-        def create_record(self):
-            record = {
-                "no": len(self.record_list) + 1,
-                "win": None,
-                "click": 0,
-                "mark": 0,
-                "random_click": 0,
-            }
-            self.record_list.append(record)
-            self.current += 1
-
-        def record_click(self):
-            self.record_list[self.current]["click"] += 1
-
-        def record_mark(self):
-            self.record_list[self.current]["mark"] += 1
-
-        def record_random_click(self):
-            self.record_list[self.current]["random_click"] += 1
-
-        def record_game_result(self, game_result):
-            self.record_list[self.current]["win"] = game_result == "WIN"
-            print(self.record_list[self.current])
-
-    stat = None
-
     looping = False
     map_initializing = False
     bot_running = False
@@ -1276,8 +1321,6 @@ class BotLooper(QRunnable):
         self.status.map_ready.connect(self.map_ready)
         self.status.bot_finished.connect(self.bot_finished)
         self.status.stop_looping.connect(self.stop_looping)
-
-        self.stat = BotLooper.Stat()
 
     def map_ready(self):
         self.map_initializing = False
@@ -1290,7 +1333,6 @@ class BotLooper(QRunnable):
 
     @Slot()
     def run(self):
-        self.stat.create_record()
         self.looping = True
         while self.looping:
             # print("[Looper] Start Bot")
@@ -1310,11 +1352,49 @@ class BotLooper(QRunnable):
             self.status.init_map.emit()
             while self.map_initializing:
                 pass
-            self.stat.create_record()
             for _ in range(1 * 10):
                 time.sleep(0.1)
                 if not self.looping:
                     break
+
+
+class BotStat:
+    record_list = list()
+    current = -1
+
+    def create_record(self):
+        record = {
+            "no": len(self.record_list) + 1,
+            "win": None,
+            "click": 0,
+            "mark": 0,
+            "random_click": 0,
+            "start_time": datetime.datetime.now(),
+            "usage_time": 0,
+        }
+        self.record_list.append(record)
+        self.current += 1
+
+    def clear_record(self):
+        self.record_list = list()
+        self.current = -1
+
+    def record_click(self):
+        self.record_list[self.current]["click"] += 1
+
+    def record_mark(self):
+        self.record_list[self.current]["mark"] += 1
+
+    def record_random_click(self):
+        self.record_list[self.current]["random_click"] += 1
+
+    def record_game_result(self, game_result):
+        if self.current >= 0 and self.record_list[self.current]["win"] is None:
+            time_delta = datetime.datetime.now() - self.record_list[self.current]["start_time"]
+            self.record_list[self.current]["usage_time"] = float(f"{time_delta.seconds}.{time_delta.microseconds}")
+            if game_result in ["WIN", "LOSE"]:
+                self.record_list[self.current]["win"] = game_result == "WIN"
+            # print(self.record_list[self.current])
 
 
 if __name__ == '__main__':
