@@ -13,6 +13,7 @@ except ImportError:
     windll = None
 
 import datetime
+import functools
 import itertools
 import os
 import sys
@@ -20,9 +21,9 @@ import time
 import webbrowser
 
 PRESET = [
-    (9, 9, 10, ),  # Easy, 12.35%
-    (16, 16, 40, ),  # Moderate, 15.62%
-    (30, 16, 99, ),  # Hard, 20.62%
+    (9, 9, 10, "Easy", Qt.Key.Key_E, ),  # Easy, 12.35%
+    (16, 16, 40, "Moderate", Qt.Key.Key_W, ),  # Moderate, 15.62%
+    (30, 16, 99, "Hard", Qt.Key.Key_Q, ),  # Hard, 20.62%
 ]
 
 FIELD_PRESET = [
@@ -31,18 +32,18 @@ FIELD_PRESET = [
     (40, 20, "Large", ),
     (60, 30, "Huge", ),
     (80, 40, "Expansive", ),
-    (100, 50, "Enormous", ),
+    (100, 50, "Gigantic", ),
 ]
 
 DIFFICULTY_PRESET = [
     (0.10, "Simple", ),
     (0.12, "Easy", ),
     (0.14, "Moderate", ),
-    (0.16, "Manageable", ),
+    (0.16, "Intermediate", ),
     (0.18, "Challenging", ),
     (0.20, "Hard", ),
-    (0.22, "Extreme", ),
-    (0.24, "Impossible", ),
+    (0.22, "Punishing", ),
+    (0.24, "Brutal", ),
 ]
 
 MIN_WIDTH = 9
@@ -409,7 +410,7 @@ class NumberLineEdit(QLineEdit):
 
 
 class CustomFieldDialog(QDialog):
-    width, height, mine = PRESET[0]
+    width, height, mine = PRESET[0][:3]
 
     mine_validator = None
     width_edit = None
@@ -700,7 +701,7 @@ class StatisticDialog(QDialog):
             elif record_list[-1]["win"] is False:
                 self.cur_result.setText("LOSE")
             else:
-                self.cur_result.setText("solving")
+                self.cur_result.setText("Solving")
 
         # self.update()
 
@@ -765,33 +766,41 @@ class MainWindow(QMainWindow):
         game_menu = menu.addMenu("&Game")
         game_menu.addAction(
             self.create_menu_action(
-                "New Game", "New Game",
+                "New &Game", "Start a new game",
                 Qt.Key.Key_R, self.menu_re_init_mine_field))
         game_menu.addSeparator()
+        for preset in PRESET:
+            game_menu.addAction(
+                self.create_menu_action(
+                    f"&{preset[3]}", "{} x {} with {} mines".format(*preset[:3]),
+                    preset[4], functools.partial(self.menu_init_mine_field, *preset[:3])))
         # Menu: Game -> Difficulty
-        difficulty_menu = game_menu.addMenu("Difficulty")
+        difficulty_menu = game_menu.addMenu("More &Difficulty")
+        # Menu: Game -> Difficulty -> Field Size
+        field_size_menu = difficulty_menu.addMenu("&Field Size")
+        for preset in FIELD_PRESET:
+            field_size_menu.addAction(
+                self.create_menu_action(
+                    f"&{preset[2]}", "{} x {}".format(*preset[:2]),
+                    trigger=functools.partial(self.menu_init_mine_field, *preset[:2])))
+        # Menu: Game -> Difficulty -> Difficulty Level
+        difficulty_level_menu = difficulty_menu.addMenu("&Difficulty Level")
+        for preset in DIFFICULTY_PRESET:
+            difficulty_level_menu.addAction(
+                self.create_menu_action(
+                    f"&{preset[1]}", "{}% lands have mine".format(int(preset[0] * 100)),
+                    trigger=functools.partial(self.menu_init_mine_field, percent=preset[0])))
         difficulty_menu.addAction(
             self.create_menu_action(
-                "Easy", "{} x {} with {} mines".format(*PRESET[0]),
-                Qt.Key.Key_Q, self.menu_init_easy_mine_field))
-        difficulty_menu.addAction(
-            self.create_menu_action(
-                "Medium", "{} x {} with {} mines".format(*PRESET[1]),
-                Qt.Key.Key_W, self.menu_init_middle_mine_field))
-        difficulty_menu.addAction(
-            self.create_menu_action(
-                "Hard", "{} x {} with {} mines".format(*PRESET[2]),
-                Qt.Key.Key_E, self.menu_init_hard_mine_field))
-        game_menu.addSeparator()
-        difficulty_menu.addAction(
-            self.create_menu_action(
-                "Custom...", "Custom field size and mine number",
+                "&Custom...", "Custom field size and number of mines",
                 Qt.Key.Key_C, self.menu_custom_mine_field))
+
         game_menu.addSeparator()
         game_menu.addAction(
             self.create_menu_action(
-                "Exit", "Exit the game",
+                "E&xit", "Exit the game",
                 Qt.Key.Key_Escape, self.menu_app_exit))
+
         # Menu: Bot
         bot_menu = menu.addMenu("&Bot")
         bot_menu.addAction(
@@ -824,6 +833,7 @@ class MainWindow(QMainWindow):
             self.create_menu_action(
                 "Statistic...", "Show solving records",
                 Qt.Key.Key_X, trigger=self.menu_statistic))
+
         # Menu: About
         about_menu = menu.addMenu("&About")
         about_menu.addAction(
@@ -858,17 +868,13 @@ class MainWindow(QMainWindow):
             self.mine_field.reset_mine_field()
             self.game_terminated = False
 
-    def menu_init_easy_mine_field(self):
+    def menu_init_mine_field(self, *args, **kwargs):
         self.stop_looper()
-        return self.init_mine_field(*PRESET[0])
-
-    def menu_init_middle_mine_field(self):
-        self.stop_looper()
-        return self.init_mine_field(*PRESET[1])
-
-    def menu_init_hard_mine_field(self):
-        self.stop_looper()
-        return self.init_mine_field(*PRESET[2])
+        if "percent" in kwargs:
+            mine_count = int(self.mine_field.field_width * self.mine_field.field_height * kwargs["percent"])
+            kwargs["mine_count"] = mine_count
+            del kwargs["percent"]
+        return self.init_mine_field(*args, **kwargs)
 
     def menu_custom_mine_field(self):
         field_size = self.mine_field.field_size()
