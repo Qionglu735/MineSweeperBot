@@ -1,16 +1,10 @@
 
 from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal
 from PySide6.QtGui import QIcon, QAction, QIntValidator
-from PySide6.QtWidgets import QApplication, QMainWindow, QDialog
+from PySide6.QtWidgets import QApplication, QMainWindow, QDialog, QToolBar
 from PySide6.QtWidgets import QWidget, QGridLayout
 from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox, QFrame
-from random import randint, shuffle
-
-try:
-    from ctypes import windll
-    windll.shell32.SetCurrentProcessExplicitAppUserModelID("Qionglu735.MineSweeperBot.1.0")
-except ImportError:
-    windll = None
+from random import seed, randint, shuffle
 
 import datetime
 import functools
@@ -19,6 +13,12 @@ import os
 import sys
 import time
 import webbrowser
+
+try:
+    from ctypes import windll
+    windll.shell32.SetCurrentProcessExplicitAppUserModelID("Qionglu735.MineSweeperBot.1.0")
+except ImportError:
+    windll = None
 
 PRESET = [
     (9, 9, 10, "Easy", Qt.Key.Key_E, ),  # Easy, 12.35%
@@ -305,7 +305,7 @@ class MineField(QWidget):
         self.setLayout(grid)
 
         self.parent().setFixedWidth(20 + self.field_width * BUTTON_SIZE)
-        self.parent().setFixedHeight(61 + self.field_height * BUTTON_SIZE)
+        self.parent().setMinimumHeight(87 + self.field_height * BUTTON_SIZE)
 
     def reset_mine_field(self):
         for land in self.land_list:
@@ -472,7 +472,7 @@ class CustomFieldDialog(QDialog):
         grid.addWidget(QLabel("Height:"), 2, 1)
         grid.addWidget(self.height_edit, 2, 2)
 
-        grid.addWidget(QLabel("Difficulty Preset:"), 3, 1)
+        grid.addWidget(QLabel("Difficulty Level:"), 3, 1)
         grid.addWidget(self.preset_combo, 3, 2)
 
         grid.addWidget(QLabel("Mines:"), 4, 1)
@@ -505,7 +505,7 @@ class CustomFieldDialog(QDialog):
 
     def preset_change(self, index):
         if self.preset_combo_change:
-            mine = max(1, int(self.width * self.height * DIFFICULTY_PRESET[index][0]))
+            mine = max(1, int(self.width * self.height * DIFFICULTY_PRESET[index][0] + 1))
             self.mine_edit.setText(str(mine))
 
     def mine_change(self, text):
@@ -717,6 +717,7 @@ class MainWindow(QMainWindow):
     statistic_dialog = None
 
     emote = ""
+    title_label = None
     menu_action_dict = dict()
     status = ""
 
@@ -752,10 +753,11 @@ class MainWindow(QMainWindow):
         self.bot_pool.setMaxThreadCount(20)
 
     def init_window(self):
+        self.setWindowTitle("MineSweeperBot")
         self.setWindowFlags(Qt.WindowType.WindowMinimizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
         self.move(
             int(QApplication.primaryScreen().size().width() * 0.3),
-            int(QApplication.primaryScreen().size().height() * 0.8),
+            int(QApplication.primaryScreen().size().height() * 0.75),
         )
         self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "Mine.ico")))
 
@@ -793,7 +795,7 @@ class MainWindow(QMainWindow):
         difficulty_menu.addAction(
             self.create_menu_action(
                 "&Custom...", "Custom field size and number of mines",
-                Qt.Key.Key_C, self.menu_custom_mine_field))
+                Qt.Key.Key_X, self.menu_custom_mine_field))
 
         game_menu.addSeparator()
         game_menu.addAction(
@@ -805,34 +807,38 @@ class MainWindow(QMainWindow):
         bot_menu = menu.addMenu("&Bot")
         bot_menu.addAction(
             self.create_menu_action(
-                "Auto Click", "Auto click if empty land found when solving",
+                "Auto Click", "Auto click if empty land found while solving",
                 Qt.Key.Key_A, self.menu_bot_switch_auto_click, check_able=True))
         bot_menu.addAction(
             self.create_menu_action(
-                "Auto Random Click", "Auto random click if no empty land found when solving",
-                Qt.Key.Key_S, self.menu_bot_switch_auto_random_click, check_able=True))
+                "Auto Mark", "Auto click if empty land found while solving",
+                Qt.Key.Key_S, self.menu_bot_switch_auto_mark, check_able=True))
+        bot_menu.addAction(
+            self.create_menu_action(
+                "Auto Guess", "Auto guess if no conclusion found while solving",
+                Qt.Key.Key_D, self.menu_bot_switch_auto_random_click, check_able=True))
         bot_menu.addSeparator()
         bot_menu.addAction(
             self.create_menu_action(
-                "Random Click Once", "Auto click a random unmarked land",
-                Qt.Key.Key_D, self.menu_bot_random_click))
+                "&Guess Once", "Auto click a random unmarked land",
+                Qt.Key.Key_B, self.menu_bot_random_click))
         bot_menu.addAction(
             self.create_menu_action(
-                "Solve One Step", "Try to solve current game one step",
+                "Solve Onc&e", "Try to solve current game one step",
                 Qt.Key.Key_F, self.menu_bot_solve_once))
         bot_menu.addAction(
             self.create_menu_action(
-                "Solve Current Game", "Try to solve current game until win or lose",
+                "Solve &Current Game", "Try to solve current game until win or lose",
                 Qt.Key.Key_G, self.menu_bot_solve))
         bot_menu.addAction(
             self.create_menu_action(
-                "Solve Continuously", "Try to solve games continuously",
-                Qt.Key.Key_H, self.menu_bot_solve_looping))
+                "Solve Continuously", "Auto start new games and solve them continuously",
+                Qt.Key.Key_V, self.menu_bot_solve_looping, check_able=True))
         bot_menu.addSeparator()
         bot_menu.addAction(
             self.create_menu_action(
-                "Statistic...", "Show solving records",
-                Qt.Key.Key_X, trigger=self.menu_statistic))
+                "&Statistic...", "Show solving records",
+                Qt.Key.Key_C, trigger=self.menu_statistic))
 
         # Menu: About
         about_menu = menu.addMenu("&About")
@@ -841,9 +847,17 @@ class MainWindow(QMainWindow):
                 "&About...", "Visit project homepage",
                 trigger=self.menu_about))
 
+        self.title_label = QLabel()
+
+        toolbar = QToolBar()
+        toolbar.setMovable(False)
+        toolbar.addWidget(self.title_label)
+
+        self.addToolBar(toolbar)
+
     def update_title(self):
         field = self.mine_field
-        self.setWindowTitle(
+        self.title_label.setText(
             f"{field.field_width} X {field.field_height} with {field.mine_count} "
             f"({field.mine_count / (field.field_width * field.field_height) * 100:.2f}%) Mines "
             f"{self.emote}"
@@ -887,6 +901,11 @@ class MainWindow(QMainWindow):
         self.bot.auto_click = not self.bot.auto_click
         print(f"AUTO_CLICK: {self.bot.auto_click}")
 
+    def menu_bot_switch_auto_mark(self):
+        self.stop_looper()
+        self.bot.auto_mark = not self.bot.auto_mark
+        print(f"AUTO_MARK: {self.bot.auto_mark}")
+
     def menu_bot_switch_auto_random_click(self):
         self.stop_looper()
         self.bot.auto_random_click = not self.bot.auto_random_click
@@ -907,6 +926,8 @@ class MainWindow(QMainWindow):
         if not MainWindow().game_terminated:
             self.bot.auto_click = True
             self.menu_action_dict["Auto Click"].setChecked(True)
+            self.bot.auto_mark = True
+            self.menu_action_dict["Auto Mark"].setChecked(True)
             self.bot_stat.create_record()
             self.start_bot()
 
@@ -921,6 +942,7 @@ class MainWindow(QMainWindow):
         self.statistic_dialog.refresh(self.bot_stat.record_list)
         self.statistic_dialog.move(self.geometry().x() - 200, self.geometry().y() - 30)
         self.statistic_dialog.show()
+        self.activateWindow()
 
     @staticmethod
     def menu_about():
@@ -1022,20 +1044,23 @@ class MainWindow(QMainWindow):
     def bot_click(self, land):  # <-- bot
         land.auto_click()
         self.bot.result.game_update_completed.emit()  # --> bot
-        self.bot_stat.record_click()
-        self.statistic_dialog.refresh(self.bot_stat.record_list)
+        if self.bot.auto_solving:
+            self.bot_stat.record_click()
+            self.statistic_dialog.refresh(self.bot_stat.record_list)
 
     def bot_random_click(self, land):  # <-- bot
         land.auto_click()
         self.bot.result.game_update_completed.emit()  # --> bot
-        self.bot_stat.record_random_click()
-        self.statistic_dialog.refresh(self.bot_stat.record_list)
+        if self.bot.auto_solving:
+            self.bot_stat.record_random_click()
+            self.statistic_dialog.refresh(self.bot_stat.record_list)
 
     def bot_mark(self, land):  # <-- bot
         land.auto_mark()
         self.bot.result.game_update_completed.emit()  # --> bot
-        self.bot_stat.record_mark()
-        self.statistic_dialog.refresh(self.bot_stat.record_list)
+        if self.bot.auto_solving:
+            self.bot_stat.record_mark()
+            self.statistic_dialog.refresh(self.bot_stat.record_list)
 
     def bot_highlight(self, land, _type):
         land.highlight(_type)
@@ -1049,8 +1074,10 @@ class MainWindow(QMainWindow):
     def start_looper(self):
         self.bot.auto_click = True
         self.menu_action_dict["Auto Click"].setChecked(True)
+        self.bot.auto_mark = True
+        self.menu_action_dict["Auto Mark"].setChecked(True)
         self.bot.auto_random_click = True
-        self.menu_action_dict["Auto Random Click"].setChecked(True)
+        self.menu_action_dict["Auto Guess"].setChecked(True)
         try:
             self.bot_pool.start(self.bot_looper)
         except RuntimeError:
@@ -1066,6 +1093,7 @@ class MainWindow(QMainWindow):
             self.statistic_dialog.refresh(self.bot_stat.record_list)
             while self.bot_looper.looping:
                 pass
+            self.menu_action_dict["Solve Continuously"].setChecked(False)
 
 
 def main():
@@ -1089,6 +1117,7 @@ class Bot(QRunnable):
         bot_finished = Signal()  # Master ->
 
     auto_click = False
+    auto_mark = False
     auto_random_click = False
     auto_step = -1
     game_updating = False
@@ -1135,25 +1164,26 @@ class Bot(QRunnable):
         self.collect_condition()
         # print("[Bot]Try to analyse ...")
         if len(self.condition_list) == 0:
-            self.result.emote.emit(":(")
             if self.auto_click:
+                self.result.emote.emit(":D")
                 return self.random_click(is_first_click=True)
             else:
                 print("[Bot] No conclusion found.")
+                self.result.emote.emit(":(")
                 self.result.message.emit(f"No conclusion found")
                 return False
         land, have_mine = self.analyse_condition()
         if land is not None:
-            if self.auto_click:
-                if not have_mine:
+            if not have_mine:
+                if self.auto_click:
                     self.result.click.emit(land)
                 else:
-                    self.result.mark.emit(land)
-            else:
-                if not have_mine:
                     print(f"[Bot] ({land.x}, {land.y}) is empty")
                     self.result.message.emit(f"({land.x + 1}, {land.y + 1}) is empty")
                     self.result.highlight.emit(land, "safe")
+            else:
+                if self.auto_mark:
+                    self.result.mark.emit(land)
                 else:
                     print(f"[Bot] ({land.x}, {land.y}) have mine")
                     self.result.message.emit(f"({land.x + 1}, {land.y + 1}) have mine")
@@ -1212,7 +1242,6 @@ class Bot(QRunnable):
                 })
 
     def random_click(self, is_first_click=False):
-        print("[Bot] Random Click")
         mine_field = MainWindow().mine_field
         land_list = [land for land in mine_field.land_list if not land.checked and land.cover == SYMBOL_BLANK]
         if len(land_list) == 0:
@@ -1221,6 +1250,7 @@ class Bot(QRunnable):
         if is_first_click:
             self.result.click.emit(land_list[x])
         else:
+            print("[Bot] Random Click")
             self.result.random_click.emit(land_list[x])
         return True
 
