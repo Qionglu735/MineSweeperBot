@@ -1099,6 +1099,8 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    import dark_theme
+    app.setPalette(dark_theme.PALETTE)
     MainWindow(app).show()
     sys.exit(app.exec())
 
