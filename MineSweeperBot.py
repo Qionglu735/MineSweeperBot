@@ -1,6 +1,6 @@
 
 from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal
-from PySide6.QtGui import QIcon, QAction, QIntValidator
+from PySide6.QtGui import QIcon, QAction, QIntValidator, QScreen
 from PySide6.QtWidgets import QApplication, QMainWindow, QDialog, QToolBar
 from PySide6.QtWidgets import QWidget, QGridLayout
 from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox, QFrame
@@ -58,6 +58,24 @@ SYMBOL_FLAG = "!"
 SYMBOL_UNKNOWN = "?"
 
 BUTTON_SIZE = 20
+
+
+def take_screenshot(main_window, screen):
+    # win_id = main_window.winId()
+    # g = main_window.geometry()
+    # fg = main_window.frameGeometry()
+    # rfg = fg.translated(-g.left(), -g.top())
+    # pixmap = QScreen.grabWindow(
+    #     screen, win_id,
+    #     rfg.left(), rfg.top(),
+    #     rfg.width(), rfg.height(),
+    #     # rfg.left() - 1, rfg.top() - 1,
+    #     # rfg.width() + 2, rfg.height() + 2,
+    # )
+    pixmap = main_window.grab()
+    if not os.path.exists("screenshot"):
+        os.mkdir("screenshot")
+    pixmap.save(f"screenshot/{datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")}.png", "png")
 
 
 class Land(QPushButton):
@@ -800,6 +818,11 @@ class MainWindow(QMainWindow):
         game_menu.addSeparator()
         game_menu.addAction(
             self.create_menu_action(
+                "&ScreenShot", "Take a screenshot",
+                Qt.Key.Key_Z, self.menu_screenshot))
+        game_menu.addSeparator()
+        game_menu.addAction(
+            self.create_menu_action(
                 "E&xit", "Exit the game",
                 Qt.Key.Key_Escape, self.menu_app_exit))
 
@@ -895,6 +918,9 @@ class MainWindow(QMainWindow):
         dialog = CustomFieldDialog(
             self, field_size["field_width"], field_size["field_height"], field_size["mine_count"])
         dialog.exec()
+
+    def menu_screenshot(self):
+        take_screenshot(self, self.app.primaryScreen())
 
     def menu_bot_switch_auto_click(self):
         self.stop_looper()
@@ -1070,6 +1096,8 @@ class MainWindow(QMainWindow):
         self.bot_looper.status.bot_finished.emit()  # --> bot_looper
         self.bot_stat.record_game_result(MainWindow().game_result)
         self.statistic_dialog.refresh(self.bot_stat.record_list)
+        if MainWindow().game_result == "LOSE":
+            take_screenshot(self, self.app.primaryScreen())
 
     def start_looper(self):
         self.bot.auto_click = True
