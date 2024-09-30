@@ -1045,8 +1045,7 @@ class MainWindow(QMainWindow):
             self.start_bot()
 
     def menu_bot_solve_looping(self):
-        self.bot_looper.looping = not self.bot_looper.looping
-        if self.bot_looper.looping:
+        if not self.bot_looper.looping:
             self.start_looper()
         else:
             self.stop_looper()
@@ -1146,6 +1145,9 @@ class MainWindow(QMainWindow):
                 land.update_tooltip(self.cheat_mode)
 
     def closeEvent(self, event):
+        self.stop_looper()
+        if self.bot and self.bot.auto_solving:
+            self.bot.result.stop_solving.emit()
         self.menu_app_exit()
 
     def start_bot(self, step=-1):
@@ -1373,7 +1375,8 @@ class Bot(QRunnable):
         if is_first_click:
             self.result.click.emit(land_list[x])
         else:
-            print("[Bot] Random Click")
+            if self.debug_print:
+                print("[Bot] Random Click")
             self.result.random_click.emit(land_list[x])
         return True
 
@@ -1407,20 +1410,22 @@ class Bot(QRunnable):
                             self.condition_list[a]["adj_land"] = cond_a_new_adj
                             self.condition_list[a]["possible_mine"] = cond_a["possible_mine"] - cond_b["possible_mine"]
                             condition_updated = True
-                            print({
-                                "land": self.condition_list[a]["land"].to_string(),
-                                "possible_mine": self.condition_list[a]["possible_mine"],
-                                "adj_land": [land.to_string() for land in self.condition_list[a]["adj_land"]],
-                            })
+                            if self.debug_print:
+                                print({
+                                    "land": self.condition_list[a]["land"].to_string(),
+                                    "possible_mine": self.condition_list[a]["possible_mine"],
+                                    "adj_land": [land.to_string() for land in self.condition_list[a]["adj_land"]],
+                                })
                         else:  # len(cond_b_new_adj) > 0:
                             self.condition_list[b]["adj_land"] = cond_b_new_adj
                             self.condition_list[b]["possible_mine"] = cond_b["possible_mine"] - cond_a["possible_mine"]
                             condition_updated = True
-                            print({
-                                "land": self.condition_list[b]["land"].to_string(),
-                                "possible_mine": self.condition_list[b]["possible_mine"],
-                                "adj_land": [land.to_string() for land in self.condition_list[b]["adj_land"]],
-                            })
+                            if self.debug_print:
+                                print({
+                                    "land": self.condition_list[b]["land"].to_string(),
+                                    "possible_mine": self.condition_list[b]["possible_mine"],
+                                    "adj_land": [land.to_string() for land in self.condition_list[b]["adj_land"]],
+                                })
             if not condition_updated:
                 break
         return None, None
@@ -1498,7 +1503,8 @@ class BotLooper(QRunnable):
             self.bot_running = True
             self.status.start_bot.emit()
             while self.bot_running:
-                pass
+                if not self.looping:
+                    break
             for _ in range(3 * 10):
                 time.sleep(0.1)
                 if not self.looping:
@@ -1510,7 +1516,8 @@ class BotLooper(QRunnable):
             self.map_initializing = True
             self.status.init_map.emit()
             while self.map_initializing:
-                pass
+                if not self.looping:
+                    break
             for _ in range(1 * 10):
                 time.sleep(0.1)
                 if not self.looping:
