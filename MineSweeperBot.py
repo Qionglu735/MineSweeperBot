@@ -2,13 +2,14 @@
 from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal
 from PySide6.QtGui import QIcon, QAction, QIntValidator, QScreen
 from PySide6.QtWidgets import QApplication, QMainWindow, QDialog, QToolBar
-from PySide6.QtWidgets import QWidget, QGridLayout
+from PySide6.QtWidgets import QWidget, QGridLayout, QFileDialog
 from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox, QFrame
 from random import seed, randint, shuffle
 
 import datetime
 import functools
 import itertools
+import json
 import os
 import sys
 import time
@@ -55,27 +56,26 @@ MAX_HEIGHT = 1000
 SYMBOL_BLANK = " "
 SYMBOL_MINE = "X"
 SYMBOL_FLAG = "!"
+SYMBOL_WRONG_FLAG = "#"
 SYMBOL_UNKNOWN = "?"
 
+COLOR_DICT = {
+    SYMBOL_BLANK: "white",
+    SYMBOL_MINE: "#ff0000",
+    SYMBOL_FLAG: "#f02020",
+    SYMBOL_WRONG_FLAG: "#f02020",
+    SYMBOL_UNKNOWN: "#2020f0",
+    "1": "#8080f0",
+    "2": "#80f080",
+    "3": "#f08080",
+    "4": "#4040f0",
+    "5": "#a0a040",
+    "6": "#40a040",
+    "7": "#000000",
+    "8": "#404040",
+}
+
 BUTTON_SIZE = 20
-
-
-def take_screenshot(main_window, screen):
-    # win_id = main_window.winId()
-    # g = main_window.geometry()
-    # fg = main_window.frameGeometry()
-    # rfg = fg.translated(-g.left(), -g.top())
-    # pixmap = QScreen.grabWindow(
-    #     screen, win_id,
-    #     rfg.left(), rfg.top(),
-    #     rfg.width(), rfg.height(),
-    #     # rfg.left() - 1, rfg.top() - 1,
-    #     # rfg.width() + 2, rfg.height() + 2,
-    # )
-    pixmap = main_window.grab()
-    if not os.path.exists("screenshot"):
-        os.mkdir("screenshot")
-    pixmap.save(f"screenshot/{datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")}.png", "png")
 
 
 class Land(QPushButton):
@@ -87,6 +87,7 @@ class Land(QPushButton):
     have_mine = False
     adjacent_mine_count = 0
     checked = False
+    wrong_flag = False
     style_sheet = """
         QPushButton {
             color: FONT_COLOR;
@@ -241,28 +242,14 @@ class Land(QPushButton):
         self.setChecked(self.checked)
         if self.checked:
             self.setText(self.content)
-            color_dict = {
-                " ": "white",
-                "X": "red",
-                "1": "#8080f0",
-                "2": "#80f080",
-                "3": "#f08080",
-                "4": "#4040f0",
-                "5": "#a0a040",
-                "6": "#40a040",
-                "7": "#000000",
-                "8": "#404040",
-            }
-            style_sheet = style_sheet.replace("FONT_COLOR", color_dict[self.content])
+            style_sheet = style_sheet.replace("FONT_COLOR", COLOR_DICT[self.content])
         else:
-            self.setText(self.cover)
-            color_dict = {
-                " ": "white",
-                "X": "red",
-                "!": "#f02020",
-                "?": "#2020f0",
-            }
-            style_sheet = style_sheet.replace("FONT_COLOR", color_dict[self.cover])
+            if self.wrong_flag:
+                self.setText(SYMBOL_WRONG_FLAG)
+                style_sheet = style_sheet.replace("FONT_COLOR", COLOR_DICT[SYMBOL_WRONG_FLAG])
+            else:
+                self.setText(self.cover)
+                style_sheet = style_sheet.replace("FONT_COLOR", COLOR_DICT[self.cover])
 
         self.setStyleSheet(style_sheet)
 
@@ -291,6 +278,27 @@ class Land(QPushButton):
         style_sheet = style_sheet.replace("FONT_COLOR", color_dict[self.cover])
         self.setStyleSheet(style_sheet)
 
+    def save(self):
+        res = dict()
+        for key in [
+            "x",
+            "y",
+            "id",
+            "cover",
+            "content",
+            "have_mine",
+            "adjacent_mine_count",
+            "checked",
+        ]:
+            res[key] = getattr(self, key)
+        return res
+
+    def load(self, data):
+        # print("load", data)
+        for key in data:
+            setattr(self, key, data[key])
+        self.update_ui()
+
 
 class MineField(QWidget):
     field_width = 0
@@ -307,8 +315,14 @@ class MineField(QWidget):
         self.init_mine_field()
 
     def init_mine_field(self):
-        grid = QGridLayout()
-        grid.setSpacing(0)
+        if self.layout() is None:
+            grid = QGridLayout()
+            grid.setSpacing(0)
+            self.setLayout(grid)
+        else:
+            grid = self.layout()
+            while grid.count() > 0:
+                grid.itemAt(0).widget().setParent(None)
 
         self.land_list = list()
         for y in range(self.field_height):
@@ -320,10 +334,8 @@ class MineField(QWidget):
 
                 self.land_list.append(land)
 
-        self.setLayout(grid)
-
         self.parent().setFixedWidth(20 + self.field_width * BUTTON_SIZE)
-        self.parent().setMinimumHeight(87 + self.field_height * BUTTON_SIZE)
+        self.parent().setFixedHeight(87 + self.field_height * BUTTON_SIZE)
 
     def reset_mine_field(self):
         for land in self.land_list:
@@ -386,8 +398,13 @@ class MineField(QWidget):
             self.parent().set_message("YOU LOSE")
             for land in self.land_list:
                 if land.have_mine:
-                    land.cover = SYMBOL_MINE
-                    land.update_ui()
+                    if land.cover != SYMBOL_FLAG:
+                        land.cover = SYMBOL_MINE
+                        land.update_ui()
+                else:
+                    if land.cover == SYMBOL_FLAG:
+                        land.wrong_flag = True
+                        land.update_ui()
         elif self.revealed_land_count() == self.field_width * self.field_height - self.mine_count:
             MainWindow().game_terminated = True
             MainWindow().game_result = "WIN"
@@ -403,6 +420,30 @@ class MineField(QWidget):
 
     def right_click(self):
         self.sender().right_click()
+
+    def save(self):
+        res = dict()
+        for key in [
+            "field_width",
+            "field_height",
+            "mine_count",
+        ]:
+            res[key] = getattr(self, key)
+        res["land_list"] = list()
+        for land in self.land_list:
+            res["land_list"].append(land.save())
+        return res
+
+    def load(self, data):
+        for key in [
+            "field_width",
+            "field_height",
+            "mine_count",
+        ]:
+            setattr(self, key, data[key])
+        self.init_mine_field()
+        for i, land in enumerate(data["land_list"]):
+            self.land_list[i].load(land)
 
 
 def singleton(cls):
@@ -818,7 +859,15 @@ class MainWindow(QMainWindow):
         game_menu.addSeparator()
         game_menu.addAction(
             self.create_menu_action(
-                "&ScreenShot", "Take a screenshot",
+                "&Save", "Save game ...",
+                Qt.Key.Key_P, self.menu_save))
+        game_menu.addAction(
+            self.create_menu_action(
+                "&Load", "Load game ...",
+                Qt.Key.Key_O, self.menu_load))
+        game_menu.addAction(
+            self.create_menu_action(
+                "S&creenShot", "Take a screenshot",
                 Qt.Key.Key_Z, self.menu_screenshot))
         game_menu.addSeparator()
         game_menu.addAction(
@@ -897,6 +946,31 @@ class MainWindow(QMainWindow):
         self.status = msg
         self.update_status_bar()
 
+    def take_screenshot(self, now):
+        # win_id = self.winId()
+        # g = self.geometry()
+        # fg = self.frameGeometry()
+        # rfg = fg.translated(-g.left(), -g.top())
+        # screen = self.app.primaryScreen()
+        # pixmap = QScreen.grabWindow(
+        #     screen, win_id,
+        #     rfg.left(), rfg.top(),
+        #     rfg.width(), rfg.height(),
+        #     # rfg.left() - 1, rfg.top() - 1,
+        #     # rfg.width() + 2, rfg.height() + 2,
+        # )
+        pixmap = self.grab()
+        if not os.path.exists("screenshot"):
+            os.mkdir("screenshot")
+        pixmap.save(f"screenshot/{now.strftime("%Y_%m_%d_%H_%M_%S_%f")}.png", "png")
+
+    def save(self):
+        return self.mine_field.save()
+
+    def load(self, data):
+        self.game_terminated = False
+        self.mine_field.load(data)
+
     def menu_re_init_mine_field(self):
         self.stop_looper()
         if not self.cheat_mode:
@@ -919,8 +993,21 @@ class MainWindow(QMainWindow):
             self, field_size["field_width"], field_size["field_height"], field_size["mine_count"])
         dialog.exec()
 
+    def menu_save(self):
+        data = self.save()
+        file_path, _ = QFileDialog.getSaveFileName(None, "Save to file")
+        if file_path:
+            with open(file_path, "w") as f:
+                json.dump(data, f)
+
+    def menu_load(self):
+        file_path, _ = QFileDialog.getOpenFileName(None, "Load from file")
+        with open(file_path, "r") as f:
+            data = json.load(f)
+            self.load(data)
+
     def menu_screenshot(self):
-        take_screenshot(self, self.app.primaryScreen())
+        self.take_screenshot(datetime.datetime.now())
 
     def menu_bot_switch_auto_click(self):
         self.stop_looper()
@@ -1097,7 +1184,10 @@ class MainWindow(QMainWindow):
         self.bot_stat.record_game_result(MainWindow().game_result)
         self.statistic_dialog.refresh(self.bot_stat.record_list)
         if MainWindow().game_result == "LOSE":
-            take_screenshot(self, self.app.primaryScreen())
+            now = datetime.datetime.now()
+            self.take_screenshot(now)
+            with open(f"screenshot/{now.strftime("%Y_%m_%d_%H_%M_%S_%f")}.txt", "w") as f:
+                json.dump(self.bot.data_before_solve, f)
 
     def start_looper(self):
         self.bot.auto_click = True
@@ -1156,6 +1246,8 @@ class Bot(QRunnable):
     condition_list = list()
     result = None
 
+    data_before_solve = None
+
     debug_print = False
 
     def __init__(self):
@@ -1178,6 +1270,7 @@ class Bot(QRunnable):
         self.auto_solving = True
         self.game_updating = False
         while self.auto_solving and self.auto_step != 0:
+            self.data_before_solve = MainWindow().save()
             self.game_updating = True
             solve_success = self.solve()
             if not solve_success:
