@@ -1,6 +1,6 @@
 
 from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal
-from PySide6.QtGui import QIcon, QAction, QIntValidator, QScreen
+from PySide6.QtGui import QIcon, QAction, QIntValidator, QScreen, QKeySequence
 from PySide6.QtWidgets import QApplication, QMainWindow, QDialog, QToolBar
 from PySide6.QtWidgets import QWidget, QGridLayout, QFileDialog
 from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox, QFrame
@@ -14,6 +14,8 @@ import os
 import sys
 import time
 import webbrowser
+
+import dark_theme
 
 try:
     from ctypes import windll
@@ -88,61 +90,15 @@ class Land(QPushButton):
     adjacent_mine_count = 0
     checked = False
     wrong_flag = False
+    custom_color = None
     style_sheet = """
         QPushButton {
             color: FONT_COLOR;
             font: "Roman Times";
-            font-size: 10;
+            font-size: FONT_SIZE;
             font-weight: bold;
+            /* BORDER_STYLE */
             background-color: #292929;
-        }
-        QPushButton:pressed {
-            border: 2px solid #a0a020;
-        }
-        QPushButton:checked {
-            background-color: #232323;
-        }
-    """
-    focus_style_sheet = """
-        QPushButton {
-            color: FONT_COLOR;
-            font: "Roman Times";
-            font-size: 10;
-            font-weight: bold;
-            border: 2px solid #a0a020;
-            background-color: #434343;
-        }
-        QPushButton:pressed {
-            border: 2px solid #a0a020;
-        }
-        QPushButton:checked {
-            background-color: #232323;
-        }
-    """
-    danger_style_sheet = """
-        QPushButton {
-            color: FONT_COLOR;
-            font: "Roman Times";
-            font-size: 10;
-            font-weight: bold;
-            border: 2px solid #a02020;
-            background-color: #434343;
-        }
-        QPushButton:pressed {
-            border: 2px solid #a0a020;
-        }
-        QPushButton:checked {
-            background-color: #232323;
-        }
-    """
-    safe_style_sheet = """
-        QPushButton {
-            color: FONT_COLOR;
-            font: "Roman Times";
-            font-size: 10;
-            font-weight: bold;
-            border: 2px solid #20a020;
-            background-color: #434343;
         }
         QPushButton:pressed {
             border: 2px solid #a0a020;
@@ -170,7 +126,10 @@ class Land(QPushButton):
         field_width = self.parent().field_width
         field_height = self.parent().field_height
 
-        if MainWindow().game_terminated or not MainWindow().game_terminated and self.cover != SYMBOL_BLANK:
+        if MainWindow().game_terminated or not MainWindow().game_terminated and self.cover in [
+            SYMBOL_FLAG,
+            SYMBOL_UNKNOWN,
+        ]:
             # prevent changing check status
             self.setChecked(self.checked)
             return
@@ -192,20 +151,24 @@ class Land(QPushButton):
                     land = self.parent().land_list[(self.x + x) + field_width * (self.y + y)]
                     if not land.checked and land.cover == SYMBOL_FLAG:
                         flag_num += 1
-            if flag_num == self.adjacent_mine_count:
+            if flag_num >= self.adjacent_mine_count:
                 for x, y in itertools.product([-1, 0, 1], [-1, 0, 1]):
                     if x == 0 and y == 0:
                         continue
                     if 0 <= self.x + x < field_width and 0 <= self.y + y < field_height:
                         land = self.parent().land_list[(self.x + x) + field_width * (self.y + y)]
-                        if not land.checked and land.cover == SYMBOL_BLANK:
+                        if not land.checked and land.cover not in [
+                            SYMBOL_FLAG,
+                            SYMBOL_UNKNOWN,
+                        ]:
                             land.left_click(chain=True)
         if not chain:
             self.parent().check_end_game(self.x, self.y)
             self.update_ui(focus=True)
 
         if not MainWindow().game_terminated:
-            MainWindow().set_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
+            MainWindow().set_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines left")
+            MainWindow().update_title()
 
     def auto_click(self):
         # print(f"Auto Click")
@@ -221,9 +184,12 @@ class Land(QPushButton):
                     self.cover = SYMBOL_UNKNOWN
                 elif self.cover == SYMBOL_UNKNOWN:
                     self.cover = SYMBOL_BLANK
+                else:
+                    self.cover = SYMBOL_FLAG
             mine_field = self.parent()
-            MainWindow().set_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines remained")
-        self.update_ui(focus=True)
+            MainWindow().set_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines left")
+            MainWindow().update_title()
+            self.update_ui(focus=True)
 
     def auto_mark(self):
         # print(f"Auto Mark")
@@ -237,21 +203,43 @@ class Land(QPushButton):
         else:
             self.setToolTip(f"({self.x + 1}, {self.y + 1}) {self.x + mine_field.field_width * self.y + 1}")
 
-    def update_ui(self, focus=False):
-        style_sheet = self.focus_style_sheet if focus else self.style_sheet
+    def update_ui(self, focus=False, custom_cover=None, custom_color=None):
+        style_sheet = self.style_sheet
+        if focus:
+            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #a0a020;")
         self.setChecked(self.checked)
         if self.checked:
             self.setText(self.content)
-            style_sheet = style_sheet.replace("FONT_COLOR", COLOR_DICT[self.content])
+            style_sheet = style_sheet \
+                .replace("FONT_COLOR", COLOR_DICT[self.content]) \
+                .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6))
         else:
             if self.wrong_flag:
                 self.setText(SYMBOL_WRONG_FLAG)
-                style_sheet = style_sheet.replace("FONT_COLOR", COLOR_DICT[SYMBOL_WRONG_FLAG])
+                style_sheet = style_sheet \
+                    .replace("FONT_COLOR", COLOR_DICT[SYMBOL_WRONG_FLAG]) \
+                    .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6))
             else:
-                self.setText(self.cover)
-                style_sheet = style_sheet.replace("FONT_COLOR", COLOR_DICT[self.cover])
+                cover = self.cover
+                if custom_cover is not None:
+                    cover = custom_cover
+                self.setText(cover)
+                if cover in COLOR_DICT:
+                    style_sheet = style_sheet \
+                        .replace("FONT_COLOR", COLOR_DICT[cover]) \
+                        .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6))
+                else:
+                    if custom_color is not None:
+                        self.custom_color = custom_color
+                    custom_color = self.custom_color
+                    if custom_color is None:
+                        custom_color = "#ffffff"
+                    style_sheet = style_sheet \
+                        .replace("FONT_COLOR", custom_color) \
+                        .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.5))
 
         self.setStyleSheet(style_sheet)
+        self.update_tooltip(MainWindow().cheat_mode)
 
         if focus:
             for land in self.parent().land_list:
@@ -263,19 +251,11 @@ class Land(QPushButton):
         return f"{self.id} ({self.x}, {self.y})"
 
     def highlight(self, _type):
+        style_sheet = self.styleSheet()
         if _type == "danger":
-            style_sheet = self.danger_style_sheet
+            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #a02020;")
         elif _type == "safe":
-            style_sheet = self.safe_style_sheet
-        else:
-            style_sheet = self.style_sheet
-        color_dict = {
-            " ": "white",
-            "X": "red",
-            "!": "#f02020",
-            "?": "#2020f0",
-        }
-        style_sheet = style_sheet.replace("FONT_COLOR", color_dict[self.cover])
+            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #20a020;")
         self.setStyleSheet(style_sheet)
 
     def save(self):
@@ -328,6 +308,7 @@ class MineField(QWidget):
         for y in range(self.field_height):
             for x in range(self.field_width):
                 land = Land(self, x, y)
+                land.cover = SYMBOL_BLANK
                 land.clicked.connect(self.left_click)
                 land.customContextMenuRequested.connect(self.right_click)
                 grid.addWidget(land, y, x)
@@ -349,7 +330,6 @@ class MineField(QWidget):
                 self.land_list[x + self.field_width * y].have_mine = False
                 self.land_list[x + self.field_width * y].adjacent_mine_count = 0
                 self.land_list[x + self.field_width * y].checked = False
-                self.land_list[x + self.field_width * y].cover = SYMBOL_BLANK
                 self.land_list[x + self.field_width * y].content = SYMBOL_BLANK
 
                 self.land_list[x + self.field_width * y].update_ui()
@@ -377,6 +357,7 @@ class MineField(QWidget):
                     land.content = SYMBOL_BLANK
                 else:
                     land.content = f"{land.adjacent_mine_count}"
+                land.update_tooltip(MainWindow().cheat_mode)
 
     def field_size(self):
         return {
@@ -615,18 +596,19 @@ class StatisticDialog(QDialog):
 
         self.setWindowTitle("Bot Statistic")
         self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "Mine.ico")))
-        self.setFixedSize(190, 300)
+        self.setFixedSize(191 - 2, 365 - 32)
 
         self.total_count = QLabel("0")
-        self.win_count, self.win_rate = QLabel("0"), QLabel("0")
-        self.lose_count, self.lose_rate = QLabel("0"), QLabel("0")
-        self.click_count, self.click_rate = QLabel("0"), QLabel("0")
-        self.mark_count, self.mark_rate = QLabel("0"), QLabel("0")
-        self.guess_count, self.guess_rate = QLabel("0"), QLabel("0")
+        self.win_count, self.win_rate = QLabel("0"), QLabel("0.00%")
+        self.lose_count, self.lose_rate = QLabel("0"), QLabel("0.00%")
+        self.click_count, self.click_rate = QLabel("0"), QLabel("0.00%")
+        self.mark_count, self.mark_rate = QLabel("0"), QLabel("0.00%")
+        self.guess_count, self.guess_rate = QLabel("0"), QLabel("0.00%")
+        self.guess_fail_count, self.guess_fail_rate = QLabel("0"), QLabel("0.00%")
         self.usage_time_avg = QLabel("0")
-        self.cur_click_count, self.cur_click_rate = QLabel("0"), QLabel("0")
-        self.cur_mark_count, self.cur_mark_rate = QLabel("0"), QLabel("0")
-        self.cur_guess_count, self.cur_guess_rate = QLabel("0"), QLabel("0")
+        self.cur_click_count, self.cur_click_rate = QLabel("0"), QLabel("0.00%")
+        self.cur_mark_count, self.cur_mark_rate = QLabel("0"), QLabel("0.00%")
+        self.cur_guess_count, self.cur_guess_rate = QLabel("0"), QLabel("0.00%")
         self.cur_usage_time = QLabel("0")
         self.cur_result = QLabel("")
 
@@ -637,6 +619,7 @@ class StatisticDialog(QDialog):
             self.click_count, self.click_rate,
             self.mark_count, self.mark_rate,
             self.guess_count, self.guess_rate,
+            self.guess_fail_count, self.guess_fail_rate,
             self.usage_time_avg,
             self.cur_click_count, self.cur_click_rate,
             self.cur_mark_count, self.cur_mark_rate,
@@ -648,61 +631,80 @@ class StatisticDialog(QDialog):
 
         grid = QGridLayout()
 
+        grid_row = 1
         count_label = QLabel("Count:")
         count_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        grid.addWidget(count_label, 1, 2)
+        grid.addWidget(count_label, grid_row, 2)
         rate_label = QLabel("Rate:")
         rate_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        grid.addWidget(rate_label, 1, 3)
+        grid.addWidget(rate_label, grid_row, 3)
 
-        grid.addWidget(QLabel("Total:"), 2, 1)
-        grid.addWidget(self.total_count, 2, 2)
+        grid_row += 1
+        grid.addWidget(QLabel("Total:"), grid_row, 1)
+        grid.addWidget(self.total_count, grid_row, 2)
 
-        grid.addWidget(QLabel("Win:"), 3, 1)
-        grid.addWidget(self.win_count, 3, 2)
-        grid.addWidget(self.win_rate, 3, 3)
+        grid_row += 1
+        grid.addWidget(QLabel("Win:"), grid_row, 1)
+        grid.addWidget(self.win_count, grid_row, 2)
+        grid.addWidget(self.win_rate, grid_row, 3)
 
-        grid.addWidget(QLabel("Lose:"), 4, 1)
-        grid.addWidget(self.lose_count, 4, 2)
-        grid.addWidget(self.lose_rate, 4, 3)
+        grid_row += 1
+        grid.addWidget(QLabel("Lose:"), grid_row, 1)
+        grid.addWidget(self.lose_count, grid_row, 2)
+        grid.addWidget(self.lose_rate, grid_row, 3)
 
-        grid.addWidget(QLabel("Click:"), 5, 1)
-        grid.addWidget(self.click_count, 5, 2)
-        grid.addWidget(self.click_rate, 5, 3)
+        grid_row += 1
+        grid.addWidget(QLabel("Click:"), grid_row, 1)
+        grid.addWidget(self.click_count, grid_row, 2)
+        grid.addWidget(self.click_rate, grid_row, 3)
 
-        grid.addWidget(QLabel("Mark:"), 6, 1)
-        grid.addWidget(self.mark_count, 6, 2)
-        grid.addWidget(self.mark_rate, 6, 3)
+        grid_row += 1
+        grid.addWidget(QLabel("Mark:"), grid_row, 1)
+        grid.addWidget(self.mark_count, grid_row, 2)
+        grid.addWidget(self.mark_rate, grid_row, 3)
 
-        grid.addWidget(QLabel("Guess:"), 7, 1)
-        grid.addWidget(self.guess_count, 7, 2)
-        grid.addWidget(self.guess_rate, 7, 3)
+        grid_row += 1
+        grid.addWidget(QLabel("Guess:"), grid_row, 1)
+        grid.addWidget(self.guess_count, grid_row, 2)
+        grid.addWidget(self.guess_rate, grid_row, 3)
 
-        grid.addWidget(QLabel("Avg. Usage Time:"), 8, 1, 1, 2)
-        grid.addWidget(self.usage_time_avg, 8, 3)
+        grid_row += 1
+        grid.addWidget(QLabel("Guess Fail:"), grid_row, 1)
+        grid.addWidget(self.guess_fail_count, grid_row, 2)
+        grid.addWidget(self.guess_fail_rate, grid_row, 3)
 
+        grid_row += 1
+        grid.addWidget(QLabel("Avg. Usage Time:"), grid_row, 1, 1, 2)
+        grid.addWidget(self.usage_time_avg, grid_row, 3)
+
+        grid_row += 1
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
-        grid.addWidget(line, 9, 1, 1, 3)
+        grid.addWidget(line, grid_row, 1, 1, 3)
 
-        grid.addWidget(QLabel("Cur. Status:"), 10, 1, 1, 2)
-        grid.addWidget(self.cur_result, 10, 3)
+        grid_row += 1
+        grid.addWidget(QLabel("Cur. Status:"), grid_row, 1, 1, 2)
+        grid.addWidget(self.cur_result, grid_row, 3)
 
-        grid.addWidget(QLabel("Cur. Click:"), 11, 1)
-        grid.addWidget(self.cur_click_count, 11, 2)
-        grid.addWidget(self.cur_click_rate, 11, 3)
+        grid_row += 1
+        grid.addWidget(QLabel("Cur. Click:"), grid_row, 1)
+        grid.addWidget(self.cur_click_count, grid_row, 2)
+        grid.addWidget(self.cur_click_rate, grid_row, 3)
 
-        grid.addWidget(QLabel("Cur. Mark:"), 12, 1)
-        grid.addWidget(self.cur_mark_count, 12, 2)
-        grid.addWidget(self.cur_mark_rate, 12, 3)
+        grid_row += 1
+        grid.addWidget(QLabel("Cur. Mark:"), grid_row, 1)
+        grid.addWidget(self.cur_mark_count, grid_row, 2)
+        grid.addWidget(self.cur_mark_rate, grid_row, 3)
 
-        grid.addWidget(QLabel("Cur. Guess:"), 13, 1)
-        grid.addWidget(self.cur_guess_count, 13, 2)
-        grid.addWidget(self.cur_guess_rate, 13, 3)
+        grid_row += 1
+        grid.addWidget(QLabel("Cur. Guess:"), grid_row, 1)
+        grid.addWidget(self.cur_guess_count, grid_row, 2)
+        grid.addWidget(self.cur_guess_rate, grid_row, 3)
 
-        grid.addWidget(QLabel("Cur. Usage Time:"), 14, 1, 1, 2)
-        grid.addWidget(self.cur_usage_time, 14, 3)
+        grid_row += 1
+        grid.addWidget(QLabel("Cur. Usage Time:"), grid_row, 1, 1, 2)
+        grid.addWidget(self.cur_usage_time, grid_row, 3)
 
         self.setLayout(grid)
 
@@ -735,6 +737,10 @@ class StatisticDialog(QDialog):
         self.guess_count.setText(f"{guess}")
         self.guess_rate.setText(f"{guess / total_op * 100:.2f}%")
 
+        self.guess_fail_count.setText(f"{lose}")
+        if guess > 0:
+            self.guess_fail_rate.setText(f"{lose / guess * 100:.2f}%")
+
         self.usage_time_avg.setText(f"{total_time / total:.6f}")
 
         if len(record_list) > 0:
@@ -756,9 +762,9 @@ class StatisticDialog(QDialog):
             self.cur_usage_time.setText(f"{time_delta.seconds}.{time_delta.microseconds}")
 
             if record_list[-1]["win"] is True:
-                self.cur_result.setText("WIN")
+                self.cur_result.setText("Win")
             elif record_list[-1]["win"] is False:
-                self.cur_result.setText("LOSE")
+                self.cur_result.setText("Lose")
             else:
                 self.cur_result.setText("Solving")
 
@@ -800,6 +806,7 @@ class MainWindow(QMainWindow):
         self.bot.result.random_click.connect(self.bot_random_click)
         self.bot.result.mark.connect(self.bot_mark)
         self.bot.result.highlight.connect(self.bot_highlight)
+        self.bot.result.custom_cover_ui.connect(self.bot_custom_cover_ui)
         self.bot.result.emote.connect(self.set_emote)
         self.bot.result.message.connect(self.set_message)
         self.bot.result.bot_finished.connect(self.bot_finished)
@@ -812,7 +819,7 @@ class MainWindow(QMainWindow):
         self.bot_pool.setMaxThreadCount(20)
 
     def init_window(self):
-        self.setWindowTitle("MineSweeperBot")
+        self.setWindowTitle("MineSweeper")
         self.setWindowFlags(Qt.WindowType.WindowMinimizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
         self.move(
             int(QApplication.primaryScreen().size().width() * 0.3),
@@ -860,11 +867,11 @@ class MainWindow(QMainWindow):
         game_menu.addAction(
             self.create_menu_action(
                 "&Save", "Save game ...",
-                Qt.Key.Key_P, self.menu_save))
+                QKeySequence("Ctrl+S"), self.menu_save))
         game_menu.addAction(
             self.create_menu_action(
                 "&Load", "Load game ...",
-                Qt.Key.Key_O, self.menu_load))
+                QKeySequence("Ctrl+L"), self.menu_load))
         game_menu.addAction(
             self.create_menu_action(
                 "S&creenShot", "Take a screenshot",
@@ -930,7 +937,8 @@ class MainWindow(QMainWindow):
     def update_title(self):
         field = self.mine_field
         self.title_label.setText(
-            f"{field.field_width} X {field.field_height} with {field.mine_count} "
+            f"{field.field_width} X {field.field_height} "
+            f"with {field.mine_count - field.marked_land_count()}/{field.mine_count} "
             f"({field.mine_count / (field.field_width * field.field_height) * 100:.2f}%) Mines "
             f"{self.emote}"
         )
@@ -1005,6 +1013,7 @@ class MainWindow(QMainWindow):
         with open(file_path, "r") as f:
             data = json.load(f)
             self.load(data)
+            self.set_message(f"Load from {file_path.split("/")[-1]}")
 
     def menu_screenshot(self):
         self.take_screenshot(datetime.datetime.now())
@@ -1144,6 +1153,22 @@ class MainWindow(QMainWindow):
             for land in self.mine_field.land_list:
                 land.update_tooltip(self.cheat_mode)
 
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        for url in event.mimeData().urls():
+            file_path = url.toLocalFile()
+            if os.path.isfile(file_path):
+                with open(file_path, "r") as f:
+                    data = json.load(f)
+                    self.load(data)
+                    self.set_message(f"Load from {file_path.split("/")[-1]}")
+                break
+
     def closeEvent(self, event):
         self.stop_looper()
         if self.bot and self.bot.auto_solving:
@@ -1181,6 +1206,10 @@ class MainWindow(QMainWindow):
         land.highlight(_type)
         self.bot.result.game_update_completed.emit()  # --> bot
 
+    @staticmethod
+    def bot_custom_cover_ui(land, custom_cover, custom_color):
+        land.update_ui(custom_cover=custom_cover, custom_color=custom_color)
+
     def bot_finished(self):  # <-- bot
         self.bot_looper.status.bot_finished.emit()  # --> bot_looper
         self.bot_stat.record_game_result(MainWindow().game_result)
@@ -1217,9 +1246,10 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    # import faulthandler
+    # faulthandler.enable()
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    import dark_theme
     app.setPalette(dark_theme.PALETTE)
     MainWindow(app).show()
     sys.exit(app.exec())
@@ -1231,6 +1261,7 @@ class Bot(QRunnable):
         random_click = Signal(object)  # --> Master
         mark = Signal(object)  # --> Master
         highlight = Signal(object, str)  # --> Master
+        custom_cover_ui = Signal(object, str, str)  # --> Master
         emote = Signal(str)   # --> Master
         message = Signal(str)  # --> Master
 
@@ -1324,8 +1355,16 @@ class Bot(QRunnable):
             return True
         else:
             self.result.emote.emit(":(")
+            possible_mine_list, possible_safe_list = self.analyse_possibility()
+            if len(possible_mine_list) == 0:
+                possible_mine_list = None
+            if len(possible_safe_list) == 0:
+                possible_safe_list = None
             if self.auto_random_click:
-                return self.random_click()
+                return self.random_click(
+                    possible_mine_list=possible_mine_list,
+                    possible_safe_list=possible_safe_list,
+                )
             else:
                 print("[Bot] No conclusion found.")
                 self.result.message.emit(f"No conclusion found")
@@ -1335,7 +1374,7 @@ class Bot(QRunnable):
         mine_field = MainWindow().mine_field
         self.condition_list = list()
         land_list = mine_field.land_list[:]
-        shuffle(land_list)
+        # shuffle(land_list)
         for land in land_list:
             if land.checked and land.adjacent_mine_count != 0:
                 x, y = land.x, land.y
@@ -1365,12 +1404,18 @@ class Bot(QRunnable):
                     "possible_mine": cond["possible_mine"],
                     "adj_land": [land.to_string() for land in cond["adj_land"]],
                 })
+        shuffle(self.condition_list)
 
-    def random_click(self, is_first_click=False):
+    def random_click(self, is_first_click=False, possible_mine_list=None, possible_safe_list=None):
         mine_field = MainWindow().mine_field
-        land_list = [land for land in mine_field.land_list if not land.checked and land.cover == SYMBOL_BLANK]
+        if possible_safe_list is not None:
+            land_list = [land for land in mine_field.land_list if land.id in possible_safe_list]
+        else:
+            land_list = [land for land in mine_field.land_list if not land.checked and land.cover == SYMBOL_BLANK]
         if len(land_list) == 0:
             return False
+        if possible_mine_list is not None and len(land_list) > len(possible_mine_list):
+            land_list = [land for land in land_list[:] if land.id not in possible_mine_list]
         x = randint(0, len(land_list) - 1)
         if is_first_click:
             self.result.click.emit(land_list[x])
@@ -1429,6 +1474,61 @@ class Bot(QRunnable):
             if not condition_updated:
                 break
         return None, None
+
+    def analyse_possibility(self):
+        mine_field = MainWindow().mine_field
+        cover_land_count = mine_field.field_width * mine_field.field_height \
+            - mine_field.revealed_land_count() - mine_field.marked_land_count()
+        cover_mine_count = mine_field.mine_count - mine_field.marked_land_count()
+        avg_mine_rate = cover_mine_count / cover_land_count
+        max_mine_rate, min_mine_rate = avg_mine_rate, avg_mine_rate
+        all_adj_land_list = dict()
+        for condition in self.condition_list:
+            for land in condition["adj_land"]:
+                if land.id not in all_adj_land_list:
+                    all_adj_land_list[land.id] = {
+                        "id": land.id,
+                        "mine_rate": 0.0,
+                    }
+        for condition in self.condition_list:
+            cond_mine_rate = condition["possible_mine"] / len(condition["adj_land"])
+            for land in condition["adj_land"]:
+                if cond_mine_rate > all_adj_land_list[land.id]["mine_rate"]:
+                    all_adj_land_list[land.id]["mine_rate"] = cond_mine_rate
+                    max_mine_rate = max(max_mine_rate, cond_mine_rate)
+                    min_mine_rate = min(min_mine_rate, cond_mine_rate)
+        print("[Bot] avg: {:.2f}, max: {:.2f}, min {:.2f}".format(avg_mine_rate, max_mine_rate, min_mine_rate))
+        high_mine_rate_list, high_safe_rate_list = list(), list()
+        for _id, land in all_adj_land_list.items():
+            cover = "{:.2f}" \
+                .format(land["mine_rate"]) \
+                .replace("0.", ".") \
+                .replace("1.00", "1.0")
+            if land["mine_rate"] == max_mine_rate:
+                self.result.custom_cover_ui.emit(mine_field.land_list[_id], cover, "#e08080")
+                high_mine_rate_list.append(_id)
+            elif land["mine_rate"] == min_mine_rate:
+                self.result.custom_cover_ui.emit(mine_field.land_list[_id], cover, "#80e080")
+                high_safe_rate_list.append(_id)
+            else:
+                self.result.custom_cover_ui.emit(mine_field.land_list[_id], cover, "#909090")
+        avg_cover = "{:.2f}" \
+            .format(avg_mine_rate) \
+            .replace("0.", ".") \
+            .replace("1.00", "1.0")
+        for land in mine_field.land_list:
+            if land.checked or land.cover != SYMBOL_BLANK or land.id in all_adj_land_list:
+                continue
+            if max_mine_rate == avg_mine_rate:
+                self.result.custom_cover_ui.emit(land, avg_cover, "#e08080")
+                high_mine_rate_list.append(land.id)
+            elif min_mine_rate == avg_mine_rate:
+                self.result.custom_cover_ui.emit(land, avg_cover, "#80e080")
+                high_safe_rate_list.append(land.id)
+            else:
+                self.result.custom_cover_ui.emit(land, avg_cover, "#909090")
+
+        return high_mine_rate_list, high_safe_rate_list
 
     @staticmethod
     def is_include(a, b, func):
@@ -1505,19 +1605,25 @@ class BotLooper(QRunnable):
             while self.bot_running:
                 if not self.looping:
                     break
-            for _ in range(3 * 10):
+            if not self.looping:
+                break
+
+            for _ in range(1 * 10):
                 time.sleep(0.1)
                 if not self.looping:
                     break
-
             if not self.looping:
                 break
+
             # print("[Looper] Init Map")
             self.map_initializing = True
             self.status.init_map.emit()
             while self.map_initializing:
                 if not self.looping:
                     break
+            if not self.looping:
+                break
+
             for _ in range(1 * 10):
                 time.sleep(0.1)
                 if not self.looping:
