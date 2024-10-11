@@ -8,6 +8,7 @@ from random import seed, randint, shuffle
 
 import datetime
 import functools
+import gzip
 import itertools
 import json
 import os
@@ -872,15 +873,11 @@ class MainWindow(QMainWindow):
             self.create_menu_action(
                 "&Load", "Load game ...",
                 QKeySequence("Ctrl+L"), self.menu_load))
-        game_menu.addAction(
-            self.create_menu_action(
-                "S&creenShot", "Take a screenshot",
-                Qt.Key.Key_Z, self.menu_screenshot))
         game_menu.addSeparator()
         game_menu.addAction(
             self.create_menu_action(
                 "E&xit", "Exit the game",
-                Qt.Key.Key_Escape, self.menu_app_exit))
+                Qt.Key.Key_Escape, self.menu_exit))
 
         # Menu: Bot
         bot_menu = menu.addMenu("&Bot")
@@ -954,7 +951,7 @@ class MainWindow(QMainWindow):
         self.status = msg
         self.update_status_bar()
 
-    def take_screenshot(self, now):
+    def take_screenshot(self):
         # win_id = self.winId()
         # g = self.geometry()
         # fg = self.frameGeometry()
@@ -968,16 +965,26 @@ class MainWindow(QMainWindow):
         #     # rfg.width() + 2, rfg.height() + 2,
         # )
         pixmap = self.grab()
-        if not os.path.exists("screenshot"):
-            os.mkdir("screenshot")
-        pixmap.save(f"screenshot/{now.strftime("%Y_%m_%d_%H_%M_%S_%f")}.png", "png")
+        return pixmap
 
-    def save(self):
-        return self.mine_field.save()
+    def save(self, file_path, data=None):
+        pixmap = self.take_screenshot()
+        pixmap.save(file_path, "png")
+        if data is None:
+            data = self.mine_field.save()
+        with open(file_path, "ab") as f:
+            # json.dump(data, f, separators=(",", ":", ))
+            f.write(gzip.compress(json.dumps(data, separators=(",", ":", )).encode("utf-8")))
 
-    def load(self, data):
-        self.game_terminated = False
-        self.mine_field.load(data)
+    def load(self, file_path):
+        with open(file_path, "rb") as f:
+            data = f.read()
+            iend_index = data.rfind(b'IEND') + len(b'IEND') + 4
+            # json_data = json.loads(data[iend_index:])
+            json_data = json.loads(gzip.decompress(data[iend_index:]))
+            self.game_terminated = False
+            self.mine_field.load(json_data)
+            self.set_message(f"Load from {file_path.split("/")[-1]}")
 
     def menu_re_init_mine_field(self):
         self.stop_looper()
@@ -1002,21 +1009,26 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def menu_save(self):
-        data = self.save()
-        file_path, _ = QFileDialog.getSaveFileName(None, "Save to file")
+        file_path, _ = QFileDialog.getSaveFileName(
+            None,
+            "Save to file",
+            f"{datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")}",
+            "PNG (*.png);;All Files (*)"
+        )
         if file_path:
-            with open(file_path, "w") as f:
-                json.dump(data, f)
+            self.save(file_path)
 
     def menu_load(self):
-        file_path, _ = QFileDialog.getOpenFileName(None, "Load from file")
-        with open(file_path, "r") as f:
-            data = json.load(f)
-            self.load(data)
-            self.set_message(f"Load from {file_path.split("/")[-1]}")
+        file_path, _ = QFileDialog.getOpenFileName(
+            None,
+            "Load from file",
+            filter="PNG (*.png);;All Files (*)",
+        )
+        if os.path.isfile(file_path):
+            self.load(file_path)
 
-    def menu_screenshot(self):
-        self.take_screenshot(datetime.datetime.now())
+    def menu_exit(self):
+        self.close()
 
     def menu_bot_switch_auto_click(self):
         self.stop_looper()
@@ -1068,9 +1080,6 @@ class MainWindow(QMainWindow):
     @staticmethod
     def menu_about():
         webbrowser.open("https://github.com/Qionglu735/MineSweeperBot")
-
-    def menu_app_exit(self):
-        sys.exit(self.app.exec())
 
     def create_menu_action(self, title, status_tip, short_cut=None, trigger=None, check_able=None):
         menu_action = QAction(title, self)
@@ -1163,17 +1172,14 @@ class MainWindow(QMainWindow):
         for url in event.mimeData().urls():
             file_path = url.toLocalFile()
             if os.path.isfile(file_path):
-                with open(file_path, "r") as f:
-                    data = json.load(f)
-                    self.load(data)
-                    self.set_message(f"Load from {file_path.split("/")[-1]}")
+                self.load(file_path)
                 break
 
     def closeEvent(self, event):
         self.stop_looper()
         if self.bot and self.bot.auto_solving:
             self.bot.result.stop_solving.emit()
-        self.menu_app_exit()
+        event.accept()
 
     def start_bot(self, step=-1):
         self.bot.auto_step = step
@@ -1214,11 +1220,10 @@ class MainWindow(QMainWindow):
         self.bot_looper.status.bot_finished.emit()  # --> bot_looper
         self.bot_stat.record_game_result(MainWindow().game_result)
         self.statistic_dialog.refresh(self.bot_stat.record_list)
-        if MainWindow().game_result == "LOSE":
+        if self.game_result == "LOSE":
             now = datetime.datetime.now()
-            self.take_screenshot(now)
-            with open(f"screenshot/{now.strftime("%Y_%m_%d_%H_%M_%S_%f")}.txt", "w") as f:
-                json.dump(self.bot.data_before_solve, f)
+            file_path = f"screenshot/{now.strftime("%Y_%m_%d_%H_%M_%S_%f")}.png"
+            self.save(file_path, self.bot.data_before_solve)
 
     def start_looper(self):
         self.bot.auto_click = True
@@ -1303,7 +1308,7 @@ class Bot(QRunnable):
         self.auto_solving = True
         self.game_updating = False
         while self.auto_solving and self.auto_step != 0:
-            self.data_before_solve = MainWindow().save()
+            self.data_before_solve = MainWindow().mine_field.save()
             self.game_updating = True
             solve_success = self.solve()
             if not solve_success:
@@ -1318,7 +1323,7 @@ class Bot(QRunnable):
 
     def solve(self):
         self.collect_condition()
-        # print("[Bot]Try to analyse ...")
+        # print("[Bot] Try to analyse ...")
         if len(self.condition_list) == 0:
             if self.auto_click:
                 self.result.emote.emit(":D")
