@@ -1223,8 +1223,10 @@ class MainWindow(QMainWindow):
         self.bot_looper.status.bot_finished.emit()  # --> bot_looper
         self.bot_stat.record_game_result(MainWindow().game_result)
         self.statistic_dialog.refresh(self.bot_stat.record_list)
-        if self.game_result == "LOSE":
+        if self.game_terminated and self.game_result == "LOSE":
             now = datetime.datetime.now()
+            if not os.path.isdir("screenshot"):
+                os.mkdir("screenshot")
             file_path = f"screenshot/{now.strftime("%Y_%m_%d_%H_%M_%S_%f")}.png"
             self.save(file_path, self.bot.data_before_solve)
 
