@@ -1,7 +1,7 @@
 
-from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal
-from PySide6.QtGui import QIcon, QAction, QIntValidator, QScreen, QKeySequence
-from PySide6.QtWidgets import QApplication, QMainWindow, QDialog, QToolBar
+from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal, QEvent, QTimer
+from PySide6.QtGui import QIcon, QAction, QIntValidator, QScreen, QKeySequence, QFont
+from PySide6.QtWidgets import QApplication, QMainWindow, QDialog, QToolBar, QSizePolicy
 from PySide6.QtWidgets import QWidget, QGridLayout, QFileDialog
 from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox, QFrame
 from random import seed, randint, shuffle
@@ -11,6 +11,7 @@ import functools
 import gzip
 import itertools
 import json
+import math
 import os
 import sys
 import time
@@ -117,7 +118,10 @@ class Land(QPushButton):
 
         # UI
         self.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
-        self.setStyleSheet(self.style_sheet.replace("FONT_COLOR", "white"))
+        self.setStyleSheet(
+            self.style_sheet
+                .replace("FONT_COLOR", "white")
+                .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6)))
         self.setCheckable(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.update_tooltip()
@@ -317,7 +321,7 @@ class MineField(QWidget):
                 self.land_list.append(land)
 
         self.parent().setFixedWidth(20 + self.field_width * BUTTON_SIZE)
-        self.parent().setFixedHeight(87 + self.field_height * BUTTON_SIZE)
+        self.parent().setFixedHeight(106 + self.field_height * BUTTON_SIZE)
 
     def reset_mine_field(self):
         for land in self.land_list:
@@ -360,6 +364,8 @@ class MineField(QWidget):
                     land.content = f"{land.adjacent_mine_count}"
                 land.update_tooltip(MainWindow().cheat_mode)
 
+        MainWindow().game_start_time = datetime.datetime.now()
+
     def field_size(self):
         return {
             "field_width": self.field_width,
@@ -378,6 +384,7 @@ class MineField(QWidget):
 
     def check_end_game(self, x, y):
         if self.land_list[x + self.field_width * y].have_mine:
+            MainWindow().game_end_time = datetime.datetime.now()
             MainWindow().game_terminated = True
             MainWindow().game_result = "LOSE"
             self.parent().set_message("YOU LOSE")
@@ -391,6 +398,7 @@ class MineField(QWidget):
                         land.wrong_flag = True
                         land.update_ui()
         elif self.revealed_land_count() == self.field_width * self.field_height - self.mine_count:
+            MainWindow().game_end_time = datetime.datetime.now()
             MainWindow().game_terminated = True
             MainWindow().game_result = "WIN"
             self.parent().set_message("YOU WIN")
@@ -609,11 +617,11 @@ class StatisticDialog(QDialog):
         self.mark_count, self.mark_rate = QLabel("0"), QLabel("0.00%")
         self.guess_count, self.guess_rate = QLabel("0"), QLabel("0.00%")
         self.guess_fail_count, self.guess_fail_rate = QLabel("0"), QLabel("0.00%")
-        self.usage_time_avg = QLabel("0")
+        self.usage_time_avg = QLabel("0.000000")
         self.cur_click_count, self.cur_click_rate = QLabel("0"), QLabel("0.00%")
         self.cur_mark_count, self.cur_mark_rate = QLabel("0"), QLabel("0.00%")
         self.cur_guess_count, self.cur_guess_rate = QLabel("0"), QLabel("0.00%")
-        self.cur_usage_time = QLabel("0")
+        self.cur_usage_time = QLabel("0.000000")
         self.cur_result = QLabel("")
 
         for label in [
@@ -716,36 +724,39 @@ class StatisticDialog(QDialog):
 
         win = len([r for r in record_list if r["win"] is True])
         lose = len([r for r in record_list if r["win"] is False])
-        total = max(1, win + lose)
+        total = win + lose
 
         click = sum([r["click"] for r in record_list])
         mark = sum([r["mark"] for r in record_list])
         guess = sum([r["random_click"] for r in record_list])
-        total_op = max(1, click + mark + guess)
-        total_time = sum([r["usage_time"] for r in record_list])
+        total_op = click + mark + guess
+        total_time = sum([r["usage_time"] for r in record_list if r["win"] is True])
 
         self.total_count.setText(f"{(win + lose)}")
 
-        self.win_count.setText(f"{win}")
-        self.win_rate.setText(f"{win / total * 100:.2f}%")
+        if total > 0:
+            self.win_count.setText(f"{win}")
+            self.win_rate.setText(f"{win / total * 100:.2f}%")
 
-        self.lose_count.setText(f"{lose}")
-        self.lose_rate.setText(f"{lose / total * 100:.2f}%")
+            self.lose_count.setText(f"{lose}")
+            self.lose_rate.setText(f"{lose / total * 100:.2f}%")
 
-        self.click_count.setText(f"{click}")
-        self.click_rate.setText(f"{click / total_op * 100:.2f}%")
+        if total_op > 0:
+            self.click_count.setText(f"{click}")
+            self.click_rate.setText(f"{click / total_op * 100:.2f}%")
 
-        self.mark_count.setText(f"{mark}")
-        self.mark_rate.setText(f"{mark / total_op * 100:.2f}%")
+            self.mark_count.setText(f"{mark}")
+            self.mark_rate.setText(f"{mark / total_op * 100:.2f}%")
 
-        self.guess_count.setText(f"{guess}")
-        self.guess_rate.setText(f"{guess / total_op * 100:.2f}%")
+            self.guess_count.setText(f"{guess}")
+            self.guess_rate.setText(f"{guess / total_op * 100:.2f}%")
 
         self.guess_fail_count.setText(f"{lose}")
         if guess > 0:
             self.guess_fail_rate.setText(f"{lose / guess * 100:.2f}%")
 
-        self.usage_time_avg.setText(f"{total_time / total:.6f}")
+        if win > 0:
+            self.usage_time_avg.setText(f"{total_time / win:.6f}")
 
         if len(record_list) > 0:
             time_delta = datetime.datetime.now() - record_list[-1]["start_time"]
@@ -763,7 +774,7 @@ class StatisticDialog(QDialog):
             self.cur_guess_count.setText(f"{cur_guess}")
             self.cur_guess_rate.setText(f"{cur_guess / cur_total_op * 100:.2f}%")
 
-            self.cur_usage_time.setText(f"{time_delta.seconds}.{time_delta.microseconds}")
+            self.cur_usage_time.setText(f"{time_delta.seconds}.{time_delta.microseconds:06}")
 
             if record_list[-1]["win"] is True:
                 self.cur_result.setText("Win")
@@ -779,15 +790,24 @@ class StatisticDialog(QDialog):
 class MainWindow(QMainWindow):
     mine_field = None
     game_terminated = False
+    game_start_time = None
+    game_end_time = None
     game_result = None
     cheat_mode = False
 
     app = None
+    ui_activated = True
+    ui_opacity_max = 1000
+    ui_opacity = ui_opacity_max
     statistic_dialog = None
 
+    menu_action_dict = dict()
     emote = ""
     title_label = None
-    menu_action_dict = dict()
+    land_label = None
+    mine_label = None
+    time_label = None
+    update_timer = None
     status = ""
 
     bot = None
@@ -918,6 +938,10 @@ class MainWindow(QMainWindow):
             self.create_menu_action(
                 "&Statistic...", "Show solving records",
                 Qt.Key.Key_C, trigger=self.menu_statistic))
+        bot_menu.addAction(
+            self.create_menu_action(
+                "Clea&r Statistic", "Clear solving records",
+                QKeySequence("Ctrl+C"), trigger=self.menu_clear_statistic))
 
         # Menu: About
         about_menu = menu.addMenu("&About")
@@ -932,16 +956,61 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         toolbar.addWidget(self.title_label)
 
+        label_font = QFont("Lucida Console", 9)
+        self.land_label = QLabel("")
+        self.land_label.setFont(label_font)
+        self.mine_label = QLabel("")
+        self.mine_label.setFont(label_font)
+        self.time_label = QLabel("")
+        self.time_label.setFont(label_font)
+
+        toolbar_2 = QToolBar()
+        toolbar_2.setMovable(False)
+        toolbar_2.addWidget(self.land_label)
+
+        spacer_left = QWidget()
+        spacer_left.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar_2.addWidget(spacer_left)
+
+        toolbar_2.addWidget(self.mine_label)
+
+        spacer_right = QWidget()
+        spacer_right.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar_2.addWidget(spacer_right)
+
+        toolbar_2.addWidget(self.time_label)
+
         self.addToolBar(toolbar)
+        self.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
+        self.addToolBar(toolbar_2)
+
+        self.update_timer = QTimer(self)
+        self.update_timer.timeout.connect(self.update_time_label)
+        self.update_timer.start(10)
 
     def update_title(self):
         field = self.mine_field
         self.title_label.setText(
-            f"{field.field_width} X {field.field_height} "
-            f"with {field.mine_count - field.marked_land_count()}/{field.mine_count} "
+            f"{field.field_width} X {field.field_height} with {field.mine_count} "
             f"({field.mine_count / (field.field_width * field.field_height) * 100:.2f}%) Mines "
             f"{self.emote}"
         )
+        self.land_label.setText(
+            f"L:{field.field_width * field.field_height - field.revealed_land_count()}"
+            f"/{field.field_width * field.field_height}"
+        )
+        self.mine_label.setText(
+            f"M:{field.mine_count - field.marked_land_count()}/{field.mine_count}"
+        )
+
+    def update_time_label(self):
+        time_delta = datetime.timedelta()
+        if self.game_start_time is not None:
+            if self.game_end_time is not None:
+                time_delta = self.game_end_time - self.game_start_time
+            else:
+                time_delta = datetime.datetime.now() - self.game_start_time
+        self.time_label.setText(f"T:{time_delta.seconds}.{math.floor(time_delta.microseconds / 10000):02.0f}")
 
     def update_status_bar(self):
         self.statusBar().showMessage(self.status)
@@ -1080,6 +1149,10 @@ class MainWindow(QMainWindow):
         self.statistic_dialog.show()
         self.activateWindow()
 
+    def menu_clear_statistic(self):
+        self.bot_stat.clear_record()
+        self.statistic_dialog.refresh(self.bot_stat.record_list)
+
     @staticmethod
     def menu_about():
         webbrowser.open("https://github.com/Qionglu735/MineSweeperBot")
@@ -1109,6 +1182,8 @@ class MainWindow(QMainWindow):
 
         self.mine_field = MineField(self, **field_size)
         self.game_terminated = False
+        self.game_start_time = None
+        self.game_end_time = None
 
         self.setCentralWidget(self.mine_field)
         self.adjustSize()
@@ -1176,13 +1251,30 @@ class MainWindow(QMainWindow):
             file_path = url.toLocalFile()
             if os.path.isfile(file_path):
                 self.load(file_path)
+                self.activateWindow()
                 break
+
+    def wheelEvent(self, event):
+        angle_delta = event.angleDelta().y()
+        self.ui_opacity = max(1, min(self.ui_opacity + int(angle_delta / 5), self.ui_opacity_max))
+        self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
 
     def closeEvent(self, event):
         self.stop_looper()
         if self.bot and self.bot.auto_solving:
             self.bot.result.stop_solving.emit()
         event.accept()
+
+    def event(self, event):
+        if event.type() == QEvent.Type.WindowActivate:
+            self.ui_activated = True
+            self.ui_opacity = min(self.ui_opacity * 2, self.ui_opacity_max)
+            self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
+        elif event.type() == QEvent.Type.WindowDeactivate:
+            self.ui_activated = False
+            self.ui_opacity = max(1, int(self.ui_opacity / 2))
+            self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
+        return super().event(event)
 
     def start_bot(self, step=-1):
         self.bot.auto_step = step
@@ -1521,13 +1613,16 @@ class Bot(QRunnable):
                 .replace("0.", ".") \
                 .replace("1.00", "1.0")
             if land["mine_rate"] == max_mine_rate:
-                self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#e08080")
+                if MainWindow().ui_activated:
+                    self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#e08080")
                 high_mine_rate_list.append(_id)
             elif land["mine_rate"] == min_mine_rate:
-                self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#80e080")
+                if MainWindow().ui_activated:
+                    self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#80e080")
                 high_safe_rate_list.append(_id)
             else:
-                self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#909090")
+                if MainWindow().ui_activated:
+                    self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#909090")
         avg_cover = "{:.2f}" \
             .format(avg_mine_rate) \
             .replace("0.", ".") \
@@ -1536,13 +1631,16 @@ class Bot(QRunnable):
             if land.checked or land.cover != SYMBOL_BLANK or land.id in all_adj_land_list:
                 continue
             if max_mine_rate == avg_mine_rate:
-                self.result.custom_cover_ui.emit(land, avg_cover, "#e08080")
+                if MainWindow().ui_activated:
+                    self.result.custom_cover_ui.emit(land, avg_cover, "#e08080")
                 high_mine_rate_list.append(land.id)
             elif min_mine_rate == avg_mine_rate:
-                self.result.custom_cover_ui.emit(land, avg_cover, "#80e080")
+                if MainWindow().ui_activated:
+                    self.result.custom_cover_ui.emit(land, avg_cover, "#80e080")
                 high_safe_rate_list.append(land.id)
             else:
-                self.result.custom_cover_ui.emit(land, avg_cover, "#909090")
+                if MainWindow().ui_activated:
+                    self.result.custom_cover_ui.emit(land, avg_cover, "#909090")
 
         return high_mine_rate_list, high_safe_rate_list
 
@@ -1668,12 +1766,18 @@ class BotStat:
         self.current = -1
 
     def record_click(self):
+        if self.current < 0:
+            self.create_record()
         self.record_list[self.current]["click"] += 1
 
     def record_mark(self):
+        if self.current < 0:
+            self.create_record()
         self.record_list[self.current]["mark"] += 1
 
     def record_random_click(self):
+        if self.current < 0:
+            self.create_record()
         self.record_list[self.current]["random_click"] += 1
 
     def record_game_result(self, game_result):
