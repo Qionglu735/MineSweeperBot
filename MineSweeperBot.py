@@ -996,7 +996,7 @@ class MainWindow(QMainWindow):
             f"{self.emote}"
         )
         self.land_label.setText(
-            f"L:{field.field_width * field.field_height - field.revealed_land_count()}"
+            f"L:{field.field_width * field.field_height - field.revealed_land_count() - field.marked_land_count()}"
             f"/{field.field_width * field.field_height}"
         )
         self.mine_label.setText(
@@ -1056,6 +1056,7 @@ class MainWindow(QMainWindow):
             json_data = json.loads(gzip.decompress(data[iend_index:]))
             self.game_terminated = False
             self.mine_field.load(json_data)
+            self.update_title()
             self.set_message(f"Load from {file_path.split("/")[-1]}")
 
     def menu_re_init_mine_field(self):
@@ -1598,13 +1599,18 @@ class Bot(QRunnable):
                 if cond_mine_rate >= 0.5:
                     if cond_mine_rate > all_adj_land_list[land]["mine_rate"]:
                         all_adj_land_list[land]["mine_rate"] = cond_mine_rate
-                        max_mine_rate = max(max_mine_rate, cond_mine_rate)
-                        min_mine_rate = min(min_mine_rate, cond_mine_rate)
+                        # max_mine_rate = max(max_mine_rate, cond_mine_rate)
+                        # min_mine_rate = min(min_mine_rate, cond_mine_rate)
                 else:
-                    if abs(cond_mine_rate - avg_mine_rate) > abs(all_adj_land_list[land]["mine_rate"] - avg_mine_rate):
+                    if all_adj_land_list[land]["mine_rate"] >= 0.5:
+                        pass
+                    elif abs(cond_mine_rate - avg_mine_rate) > abs(all_adj_land_list[land]["mine_rate"] - avg_mine_rate):
                         all_adj_land_list[land]["mine_rate"] = cond_mine_rate
-                        max_mine_rate = max(max_mine_rate, cond_mine_rate)
-                        min_mine_rate = min(min_mine_rate, cond_mine_rate)
+                        # max_mine_rate = max(max_mine_rate, cond_mine_rate)
+                        # min_mine_rate = min(min_mine_rate, cond_mine_rate)
+        for _id, land in all_adj_land_list.items():
+            max_mine_rate = max(max_mine_rate, land["mine_rate"])
+            min_mine_rate = min(min_mine_rate, land["mine_rate"])
         print("[Bot] avg: {:.2f}, max: {:.2f}, min {:.2f}".format(avg_mine_rate, max_mine_rate, min_mine_rate))
         high_mine_rate_list, high_safe_rate_list = list(), list()
         for _id, land in all_adj_land_list.items():
