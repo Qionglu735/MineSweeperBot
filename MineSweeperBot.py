@@ -382,6 +382,26 @@ class MineField(QWidget):
     def marked_land_count(self):
         return len([x for x in self.land_list if not x.checked and x.cover == SYMBOL_FLAG])
 
+    def row_mark_count(self, _id):
+        land = self.land(_id)
+        count = 0
+        for x in range(0, self.field_width):
+            if x == land.x:
+                continue
+            if self.land_list[x + self.field_width * land.y].cover == SYMBOL_FLAG:
+                count += 1
+        return count
+
+    def col_mark_count(self, _id):
+        land = self.land(_id)
+        count = 0
+        for y in range(0, self.field_height):
+            if y == land.y:
+                continue
+            if self.land_list[land.x + self.field_width * y].cover == SYMBOL_FLAG:
+                count += 1
+        return count
+
     def check_end_game(self, x, y):
         if self.land_list[x + self.field_width * y].have_mine:
             MainWindow().game_end_time = datetime.datetime.now()
@@ -608,7 +628,7 @@ class StatisticDialog(QDialog):
 
         self.setWindowTitle("Bot Statistic")
         self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "Mine.ico")))
-        self.setFixedSize(191 - 2, 365 - 32)
+        self.setFixedSize(191 - 2, 372 - 32)
 
         self.total_count = QLabel("0")
         self.win_count, self.win_rate = QLabel("0"), QLabel("0.00%")
@@ -616,6 +636,7 @@ class StatisticDialog(QDialog):
         self.click_count, self.click_rate = QLabel("0"), QLabel("0.00%")
         self.mark_count, self.mark_rate = QLabel("0"), QLabel("0.00%")
         self.guess_count, self.guess_rate = QLabel("0"), QLabel("0.00%")
+        self.guess_success_count, self.guess_success_rate = QLabel("0"), QLabel("0.00%")
         self.guess_fail_count, self.guess_fail_rate = QLabel("0"), QLabel("0.00%")
         self.usage_time_avg = QLabel("0.000000")
         self.cur_click_count, self.cur_click_rate = QLabel("0"), QLabel("0.00%")
@@ -631,6 +652,7 @@ class StatisticDialog(QDialog):
             self.click_count, self.click_rate,
             self.mark_count, self.mark_rate,
             self.guess_count, self.guess_rate,
+            self.guess_success_count, self.guess_success_rate,
             self.guess_fail_count, self.guess_fail_rate,
             self.usage_time_avg,
             self.cur_click_count, self.cur_click_rate,
@@ -679,6 +701,11 @@ class StatisticDialog(QDialog):
         grid.addWidget(QLabel("Guess:"), grid_row, 1)
         grid.addWidget(self.guess_count, grid_row, 2)
         grid.addWidget(self.guess_rate, grid_row, 3)
+
+        grid_row += 1
+        grid.addWidget(QLabel("Guess Suc.:"), grid_row, 1)
+        grid.addWidget(self.guess_success_count, grid_row, 2)
+        grid.addWidget(self.guess_success_rate, grid_row, 3)
 
         grid_row += 1
         grid.addWidget(QLabel("Guess Fail:"), grid_row, 1)
@@ -751,8 +778,10 @@ class StatisticDialog(QDialog):
             self.guess_count.setText(f"{guess}")
             self.guess_rate.setText(f"{guess / total_op * 100:.2f}%")
 
+        self.guess_success_count.setText(f"{guess - lose}")
         self.guess_fail_count.setText(f"{lose}")
         if guess > 0:
+            self.guess_success_rate.setText(f"{(guess - lose) / guess * 100:.2f}%")
             self.guess_fail_rate.setText(f"{lose / guess * 100:.2f}%")
 
         if win > 0:
@@ -1115,18 +1144,26 @@ class MainWindow(QMainWindow):
 
     def menu_bot_switch_auto_random_click(self):
         self.stop_looper()
-        self.bot.auto_random_click = not self.bot.auto_random_click
-        print(f"AUTO_RAMDOM_CLICK: {self.bot.auto_random_click}")
+        # self.bot.auto_random_click = not self.bot.auto_random_click
+        if self.bot.random_step >= 0:
+            self.bot.random_step = -1  # unlimited
+        else:
+            self.bot.random_step = 0  # not allow
+
+        print(f"AUTO_RAMDOM_CLICK: {self.bot.random_step == -1}")
 
     def menu_bot_random_click(self):
         self.stop_looper()
         if not MainWindow().game_terminated:
             self.bot.random_click()
 
-    def menu_bot_solve_once(self):
+    def menu_bot_solve_once(self, allow_guess=False):
         self.stop_looper()
         if not MainWindow().game_terminated:
-            self.start_bot(step=1)
+            if allow_guess:
+                self.start_bot(step=1, guess=1)
+            else:
+                self.start_bot(step=1)
 
     def menu_bot_solve(self):
         self.stop_looper()
@@ -1241,6 +1278,10 @@ class MainWindow(QMainWindow):
             for land in self.mine_field.land_list:
                 land.update_tooltip(self.cheat_mode)
 
+        elif event.key() == Qt.Key.Key_F and modifiers == Qt.KeyboardModifier.ControlModifier:
+            print("allow_guess")
+            self.menu_bot_solve_once(allow_guess=True)
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.accept()
@@ -1277,8 +1318,10 @@ class MainWindow(QMainWindow):
             self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
         return super().event(event)
 
-    def start_bot(self, step=-1):
+    def start_bot(self, step=-1, guess=None):
         self.bot.auto_step = step
+        if guess is not None:
+            self.bot.random_step = guess
         if step == -1:
             self.bot_stat.create_record()
         self.bot_pool.start(self.bot)
@@ -1328,7 +1371,8 @@ class MainWindow(QMainWindow):
         self.menu_action_dict["Auto Click"].setChecked(True)
         self.bot.auto_mark = True
         self.menu_action_dict["Auto Mark"].setChecked(True)
-        self.bot.auto_random_click = True
+        # self.bot.auto_random_click = True
+        self.bot.random_step = -1
         self.menu_action_dict["Auto Guess"].setChecked(True)
         try:
             self.bot_pool.start(self.bot_looper)
@@ -1374,8 +1418,9 @@ class Bot(QRunnable):
 
     auto_click = False
     auto_mark = False
-    auto_random_click = False
+    # auto_random_click = False
     auto_step = -1
+    random_step = 0
     game_updating = False
 
     auto_solving = False
@@ -1456,15 +1501,38 @@ class Bot(QRunnable):
             return True
         else:
             self.result.emote.emit(":(")
-            possible_mine_list, possible_safe_list = self.analyse_possibility()
-            if len(possible_mine_list) == 0:
-                possible_mine_list = None
-            if len(possible_safe_list) == 0:
-                possible_safe_list = None
-            if self.auto_random_click:
+            possible_mine_list, possible_safe_list, possibility_dict = self.analyse_possibility()
+
+            mine_field = MainWindow().mine_field
+            if len(possible_safe_list) > 0:
+                choice_list = possible_safe_list
+            else:
+                choice_list = [land.id for land in mine_field.land_list if not land.checked and land.cover not in [
+                    SYMBOL_FLAG,
+                    SYMBOL_UNKNOWN,
+                ]]
+                if len(choice_list) > len(possible_mine_list):
+                    choice_list = [land_id for land_id in choice_list[:] if land_id not in possible_mine_list]
+
+            print("choice_list", len(choice_list))
+
+            if choice_list[0] in possibility_dict and possibility_dict[choice_list[0]] > 0.2:
+                mark_count = dict()
+                min_mark_count = mine_field.mine_count
+                for land_id in choice_list:
+                    mark_count[land_id] = mine_field.row_mark_count(land_id) + mine_field.col_mark_count(land_id)
+                    min_mark_count = min(min_mark_count, mark_count[land_id])
+                # choice_list = sorted(choice_list, key=lambda x: mark_count[x])
+                # for land_id in choice_list:
+                #     print(land_id, mark_count[land_id])
+                choice_list = [x for x in choice_list[:] if mark_count[x] == min_mark_count]
+                print("choice_list filter by mine count", len(choice_list), choice_list)
+            # if self.auto_random_click:
+            if self.random_step == -1 or self.random_step > 0:
+                if self.random_step > 0:
+                    self.random_step -= 1
                 return self.random_click(
-                    possible_mine_list=possible_mine_list,
-                    possible_safe_list=possible_safe_list,
+                   choice_list=choice_list,
                 )
             else:
                 print("[Bot] No conclusion found.")
@@ -1504,16 +1572,15 @@ class Bot(QRunnable):
             self.condition_id_list.append(cond["id"])
         shuffle(self.condition_list)
 
-    def random_click(self, is_first_click=False, possible_mine_list=None, possible_safe_list=None):
+    def random_click(self, is_first_click=False, choice_list=None):
         mine_field = MainWindow().mine_field
-        if possible_safe_list is not None:
-            land_list = [land for land in mine_field.land_list if land.id in possible_safe_list]
+        if choice_list is not None:
+            land_list = [land for land in mine_field.land_list if land.id in choice_list]
         else:
-            land_list = [land for land in mine_field.land_list if not land.checked and land.cover == SYMBOL_BLANK]
-        if len(land_list) == 0:
-            return False
-        if possible_mine_list is not None and len(land_list) > len(possible_mine_list):
-            land_list = [land for land in land_list[:] if land.id not in possible_mine_list]
+            land_list = [land for land in mine_field.land_list if not land.checked and land.cover not in [
+                SYMBOL_FLAG,
+                SYMBOL_UNKNOWN,
+            ]]
         x = randint(0, len(land_list) - 1)
         if is_first_click:
             self.result.click.emit(land_list[x])
@@ -1577,7 +1644,7 @@ class Bot(QRunnable):
                 break
         return None, None
 
-    def analyse_possibility(self):
+    def analyse_possibility(self) -> (list, list, dict, ):
         mine_field = MainWindow().mine_field
         cover_land_count = mine_field.field_width * mine_field.field_height \
             - mine_field.revealed_land_count() - mine_field.marked_land_count()
@@ -1590,7 +1657,6 @@ class Bot(QRunnable):
                 if land not in all_adj_land_list:
                     all_adj_land_list[land] = {
                         "id": land,
-                        # "mine_rate": 0.25,
                         "mine_rate": avg_mine_rate,
                     }
         for condition in self.condition_list:
@@ -1599,20 +1665,15 @@ class Bot(QRunnable):
                 if cond_mine_rate >= 0.5:
                     if cond_mine_rate > all_adj_land_list[land]["mine_rate"]:
                         all_adj_land_list[land]["mine_rate"] = cond_mine_rate
-                        # max_mine_rate = max(max_mine_rate, cond_mine_rate)
-                        # min_mine_rate = min(min_mine_rate, cond_mine_rate)
                 else:
                     if all_adj_land_list[land]["mine_rate"] >= 0.5:
                         pass
                     elif abs(cond_mine_rate - avg_mine_rate) > abs(all_adj_land_list[land]["mine_rate"] - avg_mine_rate):
                         all_adj_land_list[land]["mine_rate"] = cond_mine_rate
-                        # max_mine_rate = max(max_mine_rate, cond_mine_rate)
-                        # min_mine_rate = min(min_mine_rate, cond_mine_rate)
         for _id, land in all_adj_land_list.items():
             max_mine_rate = max(max_mine_rate, land["mine_rate"])
             min_mine_rate = min(min_mine_rate, land["mine_rate"])
-        print("[Bot] avg: {:.2f}, max: {:.2f}, min {:.2f}".format(avg_mine_rate, max_mine_rate, min_mine_rate))
-        high_mine_rate_list, high_safe_rate_list = list(), list()
+        high_mine_rate_list, high_safe_rate_list, rate_dict = list(), list(), dict()
         for _id, land in all_adj_land_list.items():
             cover = "{:.2f}" \
                 .format(land["mine_rate"]) \
@@ -1622,10 +1683,12 @@ class Bot(QRunnable):
                 if MainWindow().ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#e08080")
                 high_mine_rate_list.append(_id)
+                rate_dict[_id] = land["mine_rate"]
             elif land["mine_rate"] == min_mine_rate:
                 if MainWindow().ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#80e080")
                 high_safe_rate_list.append(_id)
+                rate_dict[_id] = land["mine_rate"]
             else:
                 if MainWindow().ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#909090")
@@ -1640,15 +1703,21 @@ class Bot(QRunnable):
                 if MainWindow().ui_activated:
                     self.result.custom_cover_ui.emit(land, avg_cover, "#e08080")
                 high_mine_rate_list.append(land.id)
+                rate_dict[land.id] = avg_mine_rate
             elif min_mine_rate == avg_mine_rate:
                 if MainWindow().ui_activated:
                     self.result.custom_cover_ui.emit(land, avg_cover, "#80e080")
                 high_safe_rate_list.append(land.id)
+                rate_dict[land.id] = avg_mine_rate
             else:
                 if MainWindow().ui_activated:
                     self.result.custom_cover_ui.emit(land, avg_cover, "#909090")
 
-        return high_mine_rate_list, high_safe_rate_list
+        print(f"[bot] "
+              f"possible_mine_list: {len(high_mine_rate_list)} ({max_mine_rate:.2f}), "
+              f"possible_safe_list: {len(high_safe_rate_list)} ({min_mine_rate:.2f}), "
+              f"avg: {avg_mine_rate:.2f}")
+        return high_mine_rate_list, high_safe_rate_list, rate_dict
 
     @staticmethod
     def is_include(a, b, func):
