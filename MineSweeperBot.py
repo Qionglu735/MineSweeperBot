@@ -1516,7 +1516,7 @@ class Bot(QRunnable):
 
             print("choice_list", len(choice_list))
 
-            if choice_list[0] in possibility_dict and possibility_dict[choice_list[0]] > 0.2:
+            if choice_list[0] in possibility_dict and possibility_dict[choice_list[0]] > 0.3:
                 mark_count = dict()
                 min_mark_count = mine_field.mine_count
                 for land_id in choice_list:

@@ -26,4 +26,4 @@ Bot win rate
 
 1. Easy, 9 x 9 with 10 mines: 95% (1000+ test)
 2. Moderate, 16 x 16 with 40 mines: 79% (1000+ test)
-3. Hard, 36 x 16 with 99 mines: 32% (100+ test)
+3. Hard, 36 x 16 with 99 mines: 26% (1000+ test)
