@@ -171,9 +171,9 @@ class Land(QPushButton):
             self.parent().check_end_game(self.x, self.y)
             self.update_ui(focus=True)
 
+        MainWindow().update_title()
         if not MainWindow().game_terminated:
             MainWindow().set_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines left")
-            MainWindow().update_title()
 
     def auto_click(self):
         # print(f"Auto Click")
@@ -1024,12 +1024,23 @@ class MainWindow(QMainWindow):
             f"({field.mine_count / (field.field_width * field.field_height) * 100:.2f}%) Mines "
             f"{self.emote}"
         )
+        empty_land_count = field.field_width * field.field_height \
+            - field.revealed_land_count() - field.marked_land_count()
         self.land_label.setText(
-            f"L:{field.field_width * field.field_height - field.revealed_land_count() - field.marked_land_count()}"
-            f"/{field.field_width * field.field_height}"
+            f"{"L" if self.mine_field.field_width * BUTTON_SIZE < 350 else "Land"}:"
+            f"{empty_land_count}/"
+            f"{field.field_width * field.field_height}"
+            f"{"" if self.mine_field.field_width * BUTTON_SIZE < 320 else f" ({(
+                100 * (empty_land_count - (field.mine_count - field.marked_land_count())) 
+                / empty_land_count) if empty_land_count > 0 else 0:2.2f}%)"}"
         )
         self.mine_label.setText(
-            f"M:{field.mine_count - field.marked_land_count()}/{field.mine_count}"
+            f"{"M" if self.mine_field.field_width * BUTTON_SIZE < 350 else "Mine"}:"
+            f"{field.mine_count - field.marked_land_count()}/"
+            f"{field.mine_count}"
+            f"{"" if self.mine_field.field_width * BUTTON_SIZE < 320 else f" ({(
+                100 * (field.mine_count - field.marked_land_count()) 
+                / empty_land_count) if empty_land_count > 0 else 0:.2f}%)"}"
         )
 
     def update_time_label(self):
@@ -1039,7 +1050,14 @@ class MainWindow(QMainWindow):
                 time_delta = self.game_end_time - self.game_start_time
             else:
                 time_delta = datetime.datetime.now() - self.game_start_time
-        self.time_label.setText(f"T:{time_delta.seconds}.{math.floor(time_delta.microseconds / 10000):02.0f}")
+        display_second = time_delta.seconds
+        display_milliseconds = time_delta.microseconds / 1000
+        if time_delta.seconds > 999:
+            display_second = 999
+            display_milliseconds = 999
+        self.time_label.setText(
+            f"{"T" if self.mine_field.field_width * BUTTON_SIZE < 350 else "Time"}:"
+            f"{display_second}.{math.floor(display_milliseconds / 10):02.0f}")
 
     def update_status_bar(self):
         self.statusBar().showMessage(self.status)
