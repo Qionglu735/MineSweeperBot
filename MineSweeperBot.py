@@ -1522,33 +1522,35 @@ class Bot(QRunnable):
             possible_mine_list, possible_safe_list, possibility_dict = self.analyse_possibility()
 
             mine_field = MainWindow().mine_field
-            if len(possible_safe_list) > 0:
-                choice_list = possible_safe_list
-            else:
-                choice_list = [land.id for land in mine_field.land_list if not land.checked and land.cover not in [
-                    SYMBOL_FLAG,
-                    SYMBOL_UNKNOWN,
-                ]]
-                if len(choice_list) > len(possible_mine_list):
-                    choice_list = [land_id for land_id in choice_list[:] if land_id not in possible_mine_list]
-
-            print("choice_list", len(choice_list))
-
-            if choice_list[0] in possibility_dict and possibility_dict[choice_list[0]] > 0.3:
-                mark_count = dict()
-                min_mark_count = mine_field.mine_count
-                for land_id in choice_list:
-                    mark_count[land_id] = mine_field.row_mark_count(land_id) + mine_field.col_mark_count(land_id)
-                    min_mark_count = min(min_mark_count, mark_count[land_id])
-                # choice_list = sorted(choice_list, key=lambda x: mark_count[x])
-                # for land_id in choice_list:
-                #     print(land_id, mark_count[land_id])
-                choice_list = [x for x in choice_list[:] if mark_count[x] == min_mark_count]
-                print("choice_list filter by mine count", len(choice_list), choice_list)
             # if self.auto_random_click:
             if self.random_step == -1 or self.random_step > 0:
                 if self.random_step > 0:
                     self.random_step -= 1
+
+                if len(possible_safe_list) > 0:
+                    choice_list = possible_safe_list
+                else:
+                    choice_list = [land.id for land in mine_field.land_list if not land.checked and land.cover not in [
+                        SYMBOL_FLAG,
+                        SYMBOL_UNKNOWN,
+                    ]]
+                    if len(choice_list) > len(possible_mine_list):
+                        choice_list = [land_id for land_id in choice_list[:] if land_id not in possible_mine_list]
+
+                # print("choice_list", len(choice_list))
+
+                if choice_list[0] in possibility_dict and possibility_dict[choice_list[0]] > 0.3:
+                    mark_count = dict()
+                    min_mark_count = mine_field.mine_count
+                    for land_id in choice_list:
+                        mark_count[land_id] = mine_field.row_mark_count(land_id) + mine_field.col_mark_count(land_id)
+                        min_mark_count = min(min_mark_count, mark_count[land_id])
+                    # choice_list = sorted(choice_list, key=lambda x: mark_count[x])
+                    # for land_id in choice_list:
+                    #     print(land_id, mark_count[land_id])
+                    choice_list = [x for x in choice_list[:] if mark_count[x] == min_mark_count]
+                    # print("choice_list filter by mine count", len(choice_list), choice_list)
+
                 return self.random_click(
                    choice_list=choice_list,
                 )
