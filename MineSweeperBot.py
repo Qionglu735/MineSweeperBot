@@ -4,6 +4,7 @@ from PySide6.QtGui import QIcon, QAction, QIntValidator, QScreen, QKeySequence, 
 from PySide6.QtWidgets import QApplication, QMainWindow, QDialog, QToolBar, QSizePolicy
 from PySide6.QtWidgets import QWidget, QGridLayout, QFileDialog
 from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox, QFrame
+from inspect import currentframe, getframeinfo
 from random import seed, randint, shuffle
 
 import datetime
@@ -24,6 +25,9 @@ try:
     windll.shell32.SetCurrentProcessExplicitAppUserModelID("Qionglu735.MineSweeperBot.1.0")
 except ImportError:
     windll = None
+
+# import faulthandler
+# faulthandler.enable()
 
 PRESET = [
     (9, 9, 10, "Easy", Qt.Key.Key_E, ),  # Easy, 12.35%
@@ -82,7 +86,9 @@ COLOR_DICT = {
 BUTTON_SIZE = 20
 
 
-class Land(QPushButton):
+class Land(object):
+    mine_field = None
+
     x = 0
     y = 0
     id = 0
@@ -91,69 +97,44 @@ class Land(QPushButton):
     have_mine = False
     adjacent_mine_count = 0
     checked = False
+    focus = False
     wrong_flag = False
-    custom_color = None
-    style_sheet = """
-        QPushButton {
-            color: FONT_COLOR;
-            font: "Roman Times";
-            font-size: FONT_SIZE;
-            font-weight: bold;
-            /* BORDER_STYLE */
-            background-color: #292929;
-        }
-        QPushButton:pressed {
-            border: 2px solid #a0a020;
-        }
-        QPushButton:checked {
-            background-color: #232323;
-        }
-    """
 
-    def __init__(self, parent, x, y):
-        super().__init__(parent, text=SYMBOL_BLANK)
+    ui = None
 
+    def __init__(self, mine_field, x, y):
+        self.mine_field = mine_field
         self.x, self.y = x, y
-        self.id = x + parent.field_width * y
-
-        # UI
-        self.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
-        self.setStyleSheet(
-            self.style_sheet
-                .replace("FONT_COLOR", "white")
-                .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6)))
-        self.setCheckable(True)
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.update_tooltip()
+        self.id = x + self.mine_field.field_width * y
 
     def left_click(self, chain=False):
-        mine_field = self.parent()
-        field_width = self.parent().field_width
-        field_height = self.parent().field_height
+        field_width = self.mine_field.field_width
+        field_height = self.mine_field.field_height
 
-        if MainWindow().game_terminated or not MainWindow().game_terminated and self.cover in [
+        if Game().game_terminated or not Game().game_terminated and self.cover in [
             SYMBOL_FLAG,
             SYMBOL_UNKNOWN,
         ]:
             # prevent changing check status
-            self.setChecked(self.checked)
+            self.ui.setChecked(self.checked)
             return
 
         self.checked = True
         # if not chain:
         #     print(f"Click ({self.x}, {self.y})")
-        if len([x for x in mine_field.land_list if x.have_mine is True]) == 0:
+        if len([x for x in self.mine_field.land_list if x.have_mine is True]) == 0:
             # first click always safe
-            mine_field.generate_mine(self.x, self.y)
+            self.mine_field.generate_mine(self.x, self.y)
 
-        self.parent().check_end_game(self.x, self.y)
-        if not MainWindow().game_terminated:
+        # check if click on mine
+        self.mine_field.check_end_game(self.x, self.y)
+        if not self.mine_field.game.game_terminated:
             flag_num = 0
             for x, y in itertools.product([-1, 0, 1], [-1, 0, 1]):
                 if x == 0 and y == 0:
                     continue
                 if 0 <= self.x + x < field_width and 0 <= self.y + y < field_height:
-                    land = self.parent().land_list[(self.x + x) + field_width * (self.y + y)]
+                    land = self.mine_field.land_list[(self.x + x) + field_width * (self.y + y)]
                     if not land.checked and land.cover == SYMBOL_FLAG:
                         flag_num += 1
             if flag_num >= self.adjacent_mine_count:
@@ -161,26 +142,37 @@ class Land(QPushButton):
                     if x == 0 and y == 0:
                         continue
                     if 0 <= self.x + x < field_width and 0 <= self.y + y < field_height:
-                        land = self.parent().land_list[(self.x + x) + field_width * (self.y + y)]
+                        land = self.mine_field.land_list[(self.x + x) + field_width * (self.y + y)]
                         if not land.checked and land.cover not in [
                             SYMBOL_FLAG,
                             SYMBOL_UNKNOWN,
                         ]:
                             land.left_click(chain=True)
-        if not chain:
-            self.parent().check_end_game(self.x, self.y)
-            self.update_ui(focus=True)
 
-        MainWindow().update_title()
-        if not MainWindow().game_terminated:
-            MainWindow().set_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines left")
+        if not chain:
+            self.focus = True
+            self.ui.update_display()
+
+            # check if chain click on mine
+            self.mine_field.check_end_game(self.x, self.y)
+
+            for _land in self.mine_field.land_list:
+                if _land == self:
+                    continue
+                _land.focus = False
+                _land.ui.update_display()
+
+            self.mine_field.game.ui.update_title()
+            if not self.mine_field.game.game_terminated:
+                self.mine_field.game.ui.set_message(
+                    f"{self.mine_field.mine_count - self.mine_field.marked_land_count()} mines left")
 
     def auto_click(self):
         # print(f"Auto Click")
         self.left_click()
 
     def right_click(self):
-        if not MainWindow().game_terminated:
+        if not self.mine_field.game.game_terminated:
             # print(f"Mark  ({self.x}, {self.y})")
             if not self.checked:
                 if self.cover == SYMBOL_BLANK:
@@ -191,77 +183,25 @@ class Land(QPushButton):
                     self.cover = SYMBOL_BLANK
                 else:
                     self.cover = SYMBOL_FLAG
-            mine_field = self.parent()
-            MainWindow().set_message(f"{mine_field.mine_count - mine_field.marked_land_count()} mines left")
-            MainWindow().update_title()
-            self.update_ui(focus=True)
+            self.mine_field.game.ui.set_message(
+                f"{self.mine_field.mine_count - self.mine_field.marked_land_count()} mines left")
+            self.mine_field.game.ui.update_title()
+            self.focus = True
+            self.ui.update_display()
+
+            for _land in self.mine_field.land_list:
+                if _land == self:
+                    continue
+                _land.focus = False
+                _land.ui.update_display()
 
     def auto_mark(self):
         # print(f"Auto Mark")
-        while not MainWindow().game_terminated and self.cover != SYMBOL_FLAG:
+        while not self.mine_field.game.game_terminated and self.cover != SYMBOL_FLAG:
             self.right_click()
-
-    def update_tooltip(self, cheat_mode=False):
-        mine_field = self.parent()
-        if self.have_mine and cheat_mode:
-            self.setToolTip(f"! ({self.x + 1}, {self.y + 1}) {self.x + mine_field.field_width * self.y} !")
-        else:
-            self.setToolTip(f"({self.x + 1}, {self.y + 1}) {self.x + mine_field.field_width * self.y}")
-
-    def update_ui(self, focus=False, custom_cover=None, custom_color=None):
-        style_sheet = self.style_sheet
-        if focus:
-            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #a0a020;")
-        self.setChecked(self.checked)
-        if self.checked:
-            self.setText(self.content)
-            style_sheet = style_sheet \
-                .replace("FONT_COLOR", COLOR_DICT[self.content]) \
-                .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6))
-        else:
-            if self.wrong_flag:
-                self.setText(SYMBOL_WRONG_FLAG)
-                style_sheet = style_sheet \
-                    .replace("FONT_COLOR", COLOR_DICT[SYMBOL_WRONG_FLAG]) \
-                    .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6))
-            else:
-                cover = self.cover
-                if custom_cover is not None:
-                    cover = custom_cover
-                self.setText(cover)
-                if cover in COLOR_DICT:
-                    style_sheet = style_sheet \
-                        .replace("FONT_COLOR", COLOR_DICT[cover]) \
-                        .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6))
-                else:
-                    if custom_color is not None:
-                        self.custom_color = custom_color
-                    custom_color = self.custom_color
-                    if custom_color is None:
-                        custom_color = "#ffffff"
-                    style_sheet = style_sheet \
-                        .replace("FONT_COLOR", custom_color) \
-                        .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.5))
-
-        self.setStyleSheet(style_sheet)
-        self.update_tooltip(MainWindow().cheat_mode)
-
-        if focus:
-            for land in self.parent().land_list:
-                if land == self:
-                    continue
-                land.update_ui()
 
     def to_string(self):
         return f"{self.id} ({self.x}, {self.y})"
-
-    def highlight(self, _type):
-        style_sheet = self.styleSheet()
-        if _type == "danger":
-            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #a02020;")
-        elif _type == "safe":
-            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #20a020;")
-        self.setStyleSheet(style_sheet)
 
     def save(self):
         res = dict()
@@ -274,60 +214,55 @@ class Land(QPushButton):
             "have_mine",
             "adjacent_mine_count",
             "checked",
+            "focus",
         ]:
             res[key] = getattr(self, key)
         return res
 
     def load(self, data):
-        # print("load", data)
         for key in data:
             setattr(self, key, data[key])
-        self.update_ui()
+
+    def ui_init(self, parent):
+        self.ui = LandUI(self, parent)
+
+    def ui_setup(self):
+        self.ui.update_display()
+        self.ui.update_tooltip()
 
 
-class MineField(QWidget):
+class MineField(object):
+    game = None
+
     field_width = 0
     field_height = 0
     mine_count = 0
 
-    land_list = list()
+    land_list = None
 
-    def __init__(self, parent, field_width=PRESET[0][0], field_height=PRESET[0][1], mine_count=PRESET[0][2]):
-        super().__init__(parent)
-        self.field_width = min(max(MIN_WIDTH, field_width), MAX_WIDTH)
-        self.field_height = min(max(MIN_HEIGHT, field_height), MAX_HEIGHT)
-        self.mine_count = min(max(1, mine_count), (self.field_width - 1) * (self.field_height - 1))
+    ui = None
+
+    def __init__(self, game):
+        self.game = game
         self.init_mine_field()
 
     def init_mine_field(self):
-        if self.layout() is None:
-            grid = QGridLayout()
-            grid.setSpacing(0)
-            self.setLayout(grid)
-        else:
-            grid = self.layout()
-            while grid.count() > 0:
-                grid.itemAt(0).widget().setParent(None)
+        self.field_width = min(max(MIN_WIDTH, self.field_width), MAX_WIDTH)
+        self.field_height = min(max(MIN_HEIGHT, self.field_height), MAX_HEIGHT)
+        self.mine_count = min(max(1, self.mine_count), (self.field_width - 1) * (self.field_height - 1))
 
         self.land_list = list()
         for y in range(self.field_height):
             for x in range(self.field_width):
                 land = Land(self, x, y)
                 land.cover = SYMBOL_BLANK
-                land.clicked.connect(self.left_click)
-                land.customContextMenuRequested.connect(self.right_click)
-                grid.addWidget(land, y, x)
-
                 self.land_list.append(land)
-
-        self.parent().setFixedWidth(20 + self.field_width * BUTTON_SIZE)
-        self.parent().setFixedHeight(106 + self.field_height * BUTTON_SIZE)
 
     def reset_mine_field(self):
         for land in self.land_list:
             land.cover = SYMBOL_BLANK
             land.checked = False
-            land.update_ui()
+            land.ui.update_display()
 
     def generate_mine(self, safe_x=-9, safe_y=-9):
         for x in range(self.field_width):
@@ -337,7 +272,7 @@ class MineField(QWidget):
                 self.land_list[x + self.field_width * y].checked = False
                 self.land_list[x + self.field_width * y].content = SYMBOL_BLANK
 
-                self.land_list[x + self.field_width * y].update_ui()
+                # self.land_list[x + self.field_width * y].ui.update_display()
 
         for _ in range(self.mine_count):
             x, y = -1, -1
@@ -362,9 +297,9 @@ class MineField(QWidget):
                     land.content = SYMBOL_BLANK
                 else:
                     land.content = f"{land.adjacent_mine_count}"
-                land.update_tooltip(MainWindow().cheat_mode)
+                # land.ui.update_tooltip(Game().cheat_mode)
 
-        MainWindow().game_start_time = datetime.datetime.now()
+        self.game.game_start_time = datetime.datetime.now()
 
     def field_size(self):
         return {
@@ -404,35 +339,29 @@ class MineField(QWidget):
 
     def check_end_game(self, x, y):
         if self.land_list[x + self.field_width * y].have_mine:
-            MainWindow().game_end_time = datetime.datetime.now()
-            MainWindow().game_terminated = True
-            MainWindow().game_result = "LOSE"
-            self.parent().set_message("YOU LOSE")
+            self.game.game_end_time = datetime.datetime.now()
+            self.game.game_terminated = True
+            self.game.game_result = "LOSE"
+            self.game.ui.set_message("YOU LOSE")
             for land in self.land_list:
                 if land.have_mine:
                     if land.cover != SYMBOL_FLAG:
                         land.cover = SYMBOL_MINE
-                        land.update_ui()
+                        land.ui.update_display()
                 else:
                     if land.cover == SYMBOL_FLAG:
                         land.wrong_flag = True
-                        land.update_ui()
+                        land.ui.update_display()
         elif self.revealed_land_count() == self.field_width * self.field_height - self.mine_count:
-            MainWindow().game_end_time = datetime.datetime.now()
-            MainWindow().game_terminated = True
-            MainWindow().game_result = "WIN"
-            self.parent().set_message("YOU WIN")
+            self.game.game_end_time = datetime.datetime.now()
+            self.game.game_terminated = True
+            self.game.game_result = "WIN"
+            self.game.ui.set_message("YOU WIN")
             for y in range(self.field_height):
                 for x in range(self.field_width):
                     if self.land_list[x + self.field_width * y].have_mine:
                         self.land_list[x + self.field_width * y].cover = SYMBOL_FLAG
-                        self.land_list[x + self.field_width * y].update_ui()
-
-    def left_click(self):
-        self.sender().left_click()
-
-    def right_click(self):
-        self.sender().right_click()
+                        # self.land_list[x + self.field_width * y].ui.update_display()
 
     def save(self):
         res = dict()
@@ -458,6 +387,19 @@ class MineField(QWidget):
         for i, land in enumerate(data["land_list"]):
             self.land_list[i].load(land)
 
+    def ui_init(self, parent):
+        self.ui = MineFieldUI(parent)
+
+    def ui_setup(self):
+        self.ui.init_grid()
+        for land in self.land_list:
+            land.ui_init(self.ui)
+            self.ui.add_land(land.ui, land.y, land.x)
+            land.ui_setup()
+
+        self.game.ui.setFixedWidth(20 + self.field_width * BUTTON_SIZE)
+        self.game.ui.setFixedHeight(106 + self.field_height * BUTTON_SIZE)
+
 
 def singleton(cls):
     instances = dict()
@@ -466,7 +408,354 @@ def singleton(cls):
         if cls not in instances:
             instances[cls] = cls(*args, **kwargs)
         return instances[cls]
+
     return get_instance
+
+
+@singleton
+class Game(object):
+    game_terminated = False
+    game_start_time = None
+    game_end_time = None
+    game_result = None
+    cheat_mode = False
+
+    mine_field = None
+
+    bot = None
+    bot_start_time = None
+    bot_looper = None
+    bot_pool = None
+    bot_stat = None
+
+    ui_app = None
+    ui = None
+
+    def __init__(self):
+        self.mine_field = MineField(self)
+        self.bot_stat = BotStat()
+
+        self.bot = Bot()
+        self.bot.result.click.connect(self.bot_click)
+        self.bot.result.random_click.connect(self.bot_random_click)
+        self.bot.result.mark.connect(self.bot_mark)
+        self.bot.result.custom_cover_ui.connect(self.bot_custom_cover_ui)
+        self.bot.result.bot_finished.connect(self.bot_finished)
+
+        self.bot_looper = BotLooper()
+        self.bot_looper.status.init_map.connect(self.new_game_setup)
+        self.bot_looper.status.start_bot.connect(self.start_bot)
+
+        self.bot_pool = QThreadPool()
+        self.bot_pool.setMaxThreadCount(20)
+
+        self.ui_init()
+
+    def new_game_setup(self, field_width=0, field_height=0, mine_count=0):
+        if field_width > 0:
+            self.mine_field.field_width = field_width
+        if field_height > 0:
+            self.mine_field.field_height = field_height
+        if mine_count > 0:
+            self.mine_field.mine_count = mine_count
+
+        self.mine_field.init_mine_field()
+
+        self.game_terminated = False
+        self.game_start_time = None
+        self.game_end_time = None
+
+        self.mine_field.ui_setup()
+        self.ui.setCentralWidget(self.mine_field.ui)
+        self.ui.adjustSize()
+        self.ui.set_emote("")
+        self.ui.set_message("New Game Ready")
+
+        if self.bot_looper is not None and self.bot_looper.looping:
+            self.bot_looper.status.map_ready.emit()  # --> bot_looper
+
+    def save(self, file_path, data=None):
+        pixmap = self.ui.take_screenshot()
+        pixmap.save(file_path, "png")
+        if data is None:
+            data = self.mine_field.save()
+        with open(file_path, "ab") as f:
+            f.write(gzip.compress(json.dumps(data, separators=(",", ":", )).encode("utf-8")))
+
+    def load(self, file_path):
+        with open(file_path, "rb") as f:
+            data = f.read()
+            iend_index = data.rfind(b'IEND') + len(b'IEND') + 4
+            json_data = json.loads(gzip.decompress(data[iend_index:]))
+            self.game_terminated = False
+            self.mine_field.load(json_data)
+            self.mine_field.ui_setup()
+            self.ui.update_title()
+            self.ui.set_message(f"Load from {file_path.split("/")[-1]}")
+
+    def start_bot(self, step=-1, guess=None):
+        self.bot.auto_step = step
+        if guess is not None:
+            self.bot.random_step = guess
+        if step == -1:
+            self.bot_stat.create_record()
+        self.bot_pool.start(self.bot)
+
+    def bot_click(self, land):  # <-- bot
+        land.auto_click()
+        self.bot.result.game_update_completed.emit()  # --> bot
+        if self.bot.auto_solving:
+            self.bot_stat.record_click()
+            self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+
+    def bot_random_click(self, land):  # <-- bot
+        land.auto_click()
+        self.bot.result.game_update_completed.emit()  # --> bot
+        if self.bot.auto_solving:
+            self.bot_stat.record_random_click()
+            self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+
+    def bot_mark(self, land):  # <-- bot
+        land.auto_mark()
+        self.bot.result.game_update_completed.emit()  # --> bot
+        if self.bot.auto_solving:
+            self.bot_stat.record_mark()
+            self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+
+    @staticmethod
+    def bot_custom_cover_ui(land, custom_cover, custom_color):
+        land.ui.update_display(custom_cover=custom_cover, custom_color=custom_color)
+
+    def bot_finished(self):  # <-- bot
+        self.bot_looper.status.bot_finished.emit()  # --> bot_looper
+        self.bot_stat.record_game_result(self.game_result)
+        self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+        if self.game_terminated and self.game_result == "LOSE":
+            now = datetime.datetime.now()
+            if not os.path.isdir("screenshot"):
+                os.mkdir("screenshot")
+            file_path = f"screenshot/{now.strftime("%Y_%m_%d_%H_%M_%S_%f")}.png"
+            self.save(file_path, self.bot.data_before_solve)
+
+    def start_looper(self):
+        self.bot.auto_click = True
+        self.ui.menu_action_dict["Auto Click"].setChecked(True)
+        self.bot.auto_mark = True
+        self.ui.menu_action_dict["Auto Mark"].setChecked(True)
+        # self.bot.auto_random_click = True
+        self.bot.random_step = -1
+        self.ui.menu_action_dict["Auto Guess"].setChecked(True)
+        try:
+            self.bot_pool.start(self.bot_looper)
+        except RuntimeError:
+            self.bot_looper = BotLooper()
+            self.bot_looper.status.init_map.connect(self.new_game_setup)
+            self.bot_looper.status.start_bot.connect(self.start_bot)
+            self.bot_pool.start(self.bot_looper)
+
+    def stop_looper(self):
+        if self.bot_looper is not None and self.bot_looper.looping:
+            self.bot_looper.status.stop_looping.emit()  # --> bot_looper
+            self.bot.result.stop_solving.emit()  # --> bot
+            self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+            while self.bot_looper.looping:
+                pass
+            self.ui.menu_action_dict["Solve Continuously"].setChecked(False)
+
+    def ui_init(self):
+        self.ui_app = QApplication(sys.argv)
+        self.ui_app.setStyle("Fusion")
+        self.ui_app.setPalette(dark_theme.PALETTE)
+
+        self.ui = GameUI(self)
+
+        self.mine_field.ui_init(self.ui)
+
+        self.bot.result.emote.connect(self.ui.set_emote)
+        self.bot.result.message.connect(self.ui.set_message)
+        self.bot.result.highlight.connect(self.ui.bot_highlight)
+
+    def ui_setup(self):
+        self.ui.show()
+
+    def ui_wait_for_exit(self):
+        sys.exit(self.ui_app.exec())
+
+
+class LandUI(QPushButton):
+    land = None
+
+    custom_color = None
+    style_sheet = """
+        QPushButton {
+            color: FONT_COLOR;
+            font: "Roman Times";
+            font-size: FONT_SIZE;
+            font-weight: bold;
+            /* BORDER_STYLE */
+            background-color: #292929;
+        }
+        QPushButton:pressed {
+            border: 2px solid #797917;
+        }
+        QPushButton:checked {
+            background-color: #232323;
+        }
+    """
+
+    def __init__(self, land, parent):
+        super().__init__(parent, text=SYMBOL_BLANK)
+
+        self.land = land
+
+        self.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
+        self.setStyleSheet(
+            self.style_sheet
+                .replace("FONT_COLOR", "white")
+                .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6)))
+        self.setCheckable(True)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+    def left_click(self, chain=False):
+        self.land.left_click(chain)
+
+    def auto_click(self):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def right_click(self):
+        self.land.right_click()
+
+    def auto_mark(self):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def update_display(self, custom_cover=None, custom_color=None):
+        style_sheet = self.style_sheet
+        if self.land.focus:
+            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #a3a323;")
+        self.setChecked(self.land.checked)
+        if self.land.checked:
+            self.setText(self.land.content)
+            style_sheet = style_sheet \
+                .replace("FONT_COLOR", COLOR_DICT[self.land.content]) \
+                .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6))
+        else:
+            if self.land.wrong_flag:
+                self.setText(SYMBOL_WRONG_FLAG)
+                style_sheet = style_sheet \
+                    .replace("FONT_COLOR", COLOR_DICT[SYMBOL_WRONG_FLAG]) \
+                    .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6))
+            else:
+                cover = self.land.cover
+                if custom_cover is not None:
+                    cover = custom_cover
+                self.setText(cover)
+                if cover in COLOR_DICT:
+                    style_sheet = style_sheet \
+                        .replace("FONT_COLOR", COLOR_DICT[cover]) \
+                        .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6))
+                else:
+                    if custom_color is not None:
+                        self.custom_color = custom_color
+                    custom_color = self.custom_color
+                    if custom_color is None:
+                        custom_color = "#ffffff"
+                    style_sheet = style_sheet \
+                        .replace("FONT_COLOR", custom_color) \
+                        .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.5))
+
+        self.setStyleSheet(style_sheet)
+        self.update_tooltip(Game().cheat_mode)
+
+        # if self.land.focus:
+        #     for _land in self.land.mine_field.land_list:
+        #         if _land == self:
+        #             continue
+        #         _land.focus = False
+        #         _land.ui.update_display()
+
+    def update_tooltip(self, cheat_mode=False):
+        if self.land.have_mine and cheat_mode:
+            self.setToolTip(f"! ({self.land.x + 1}, {self.land.y + 1}) {self.land.id} !")
+        else:
+            self.setToolTip(f"({self.land.x + 1}, {self.land.y + 1}) {self.land.id}")
+
+    def to_string(self):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def highlight(self, _type):
+        style_sheet = self.styleSheet()
+        if _type == "danger":
+            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #a02020;")
+        elif _type == "safe":
+            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #20a020;")
+        self.setStyleSheet(style_sheet)
+
+    def save(self):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def load(self, data):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+
+class MineFieldUI(QWidget):
+
+    def __init__(self, parent):
+        super().__init__(parent)
+
+    def init_grid(self):
+        if self.layout() is None:
+            grid = QGridLayout()
+            grid.setSpacing(0)
+            self.setLayout(grid)
+        else:
+            grid = self.layout()
+            while grid.count() > 0:
+                grid.itemAt(0).widget().setParent(None)
+
+    def add_land(self, land, y, x):
+        land.clicked.connect(self.left_click)
+        land.customContextMenuRequested.connect(self.right_click)
+        grid = self.layout()
+        grid.addWidget(land, y, x)
+
+    def reset_mine_field(self):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def generate_mine(self, safe_x=-9, safe_y=-9):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def field_size(self):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def land(self, _id):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def revealed_land_count(self):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def marked_land_count(self):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def row_mark_count(self, _id):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def col_mark_count(self, _id):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def check_end_game(self, x, y):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def left_click(self):
+        self.sender().left_click()
+
+    def right_click(self):
+        self.sender().right_click()
+
+    def save(self):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
+
+    def load(self, data):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
 
 class NumberLineEdit(QLineEdit):
@@ -604,7 +893,7 @@ class CustomFieldDialog(QDialog):
         self.preset_combo_change = True
 
     def confirm(self):
-        self.parent().init_mine_field(self.width, self.height, self.mine)
+        self.parent().game.new_game_setup(self.width, self.height, self.mine)
         self.done(0)
 
 
@@ -815,16 +1104,9 @@ class StatisticDialog(QDialog):
         # self.update()
 
 
-@singleton
-class MainWindow(QMainWindow):
-    mine_field = None
-    game_terminated = False
-    game_start_time = None
-    game_end_time = None
-    game_result = None
-    cheat_mode = False
+class GameUI(QMainWindow):
+    game = None
 
-    app = None
     ui_activated = True
     ui_opacity_max = 1000
     ui_opacity = ui_opacity_max
@@ -839,37 +1121,11 @@ class MainWindow(QMainWindow):
     update_timer = None
     status = ""
 
-    bot = None
-    bot_start_time = None
-    bot_looper = None
-    bot_pool = None
-    bot_stat = None
-
-    def __init__(self, app):
+    def __init__(self, game):
         super().__init__()
-        self.app = app
+        self.game = game
+
         self.init_window()
-
-        self.bot_stat = BotStat()
-
-        self.init_mine_field()
-
-        self.bot = Bot()
-        self.bot.result.click.connect(self.bot_click)
-        self.bot.result.random_click.connect(self.bot_random_click)
-        self.bot.result.mark.connect(self.bot_mark)
-        self.bot.result.highlight.connect(self.bot_highlight)
-        self.bot.result.custom_cover_ui.connect(self.bot_custom_cover_ui)
-        self.bot.result.emote.connect(self.set_emote)
-        self.bot.result.message.connect(self.set_message)
-        self.bot.result.bot_finished.connect(self.bot_finished)
-
-        self.bot_looper = BotLooper()
-        self.bot_looper.status.init_map.connect(self.init_mine_field)
-        self.bot_looper.status.start_bot.connect(self.start_bot)
-
-        self.bot_pool = QThreadPool()
-        self.bot_pool.setMaxThreadCount(20)
 
     def init_window(self):
         self.setWindowTitle("MineSweeper")
@@ -882,19 +1138,60 @@ class MainWindow(QMainWindow):
 
         self.statistic_dialog = StatisticDialog(self)
 
+        self.title_label = QLabel()
+
+        self.init_menu()
+
+        toolbar = QToolBar()
+        toolbar.setMovable(False)
+        toolbar.addWidget(self.title_label)
+
+        label_font = QFont("Lucida Console", 9)
+        self.land_label = QLabel("")
+        self.land_label.setFont(label_font)
+        self.mine_label = QLabel("")
+        self.mine_label.setFont(label_font)
+        self.time_label = QLabel("")
+        self.time_label.setFont(label_font)
+
+        toolbar_2 = QToolBar()
+        toolbar_2.setMovable(False)
+        toolbar_2.addWidget(self.land_label)
+
+        spacer_left = QWidget()
+        spacer_left.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar_2.addWidget(spacer_left)
+
+        toolbar_2.addWidget(self.mine_label)
+
+        spacer_right = QWidget()
+        spacer_right.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar_2.addWidget(spacer_right)
+
+        toolbar_2.addWidget(self.time_label)
+
+        self.addToolBar(toolbar)
+        self.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
+        self.addToolBar(toolbar_2)
+
+        self.update_timer = QTimer(self)
+        self.update_timer.timeout.connect(self.update_time_label)
+        self.update_timer.start(10)
+
+    def init_menu(self):
         menu = self.menuBar()
         # Menu: Game
         game_menu = menu.addMenu("&Game")
         game_menu.addAction(
             self.create_menu_action(
                 "New &Game", "Start a new game",
-                Qt.Key.Key_R, self.menu_re_init_mine_field))
+                Qt.Key.Key_R, self.menu_new_game_reset))
         game_menu.addSeparator()
         for preset in PRESET:
             game_menu.addAction(
                 self.create_menu_action(
                     f"&{preset[3]}", "{} x {} with {} mines".format(*preset[:3]),
-                    preset[4], functools.partial(self.menu_init_mine_field, *preset[:3])))
+                    preset[4], functools.partial(self.menu_new_game_setup, *preset[:3])))
         # Menu: Game -> Difficulty
         difficulty_menu = game_menu.addMenu("More &Difficulty")
         # Menu: Game -> Difficulty -> Field Size
@@ -903,14 +1200,14 @@ class MainWindow(QMainWindow):
             field_size_menu.addAction(
                 self.create_menu_action(
                     f"&{preset[2]}", "{} x {}".format(*preset[:2]),
-                    trigger=functools.partial(self.menu_init_mine_field, *preset[:2])))
+                    trigger=functools.partial(self.menu_new_game_setup, *preset[:2])))
         # Menu: Game -> Difficulty -> Difficulty Level
         difficulty_level_menu = difficulty_menu.addMenu("&Difficulty Level")
         for preset in DIFFICULTY_PRESET:
             difficulty_level_menu.addAction(
                 self.create_menu_action(
                     f"&{preset[1]}", "{}% lands have mine".format(int(preset[0] * 100)),
-                    trigger=functools.partial(self.menu_init_mine_field, percent=preset[0])))
+                    trigger=functools.partial(self.menu_new_game_setup, percent=preset[0])))
         difficulty_menu.addAction(
             self.create_menu_action(
                 "&Custom...", "Custom field size and number of mines",
@@ -979,46 +1276,8 @@ class MainWindow(QMainWindow):
                 "&About...", "Visit project homepage",
                 trigger=self.menu_about))
 
-        self.title_label = QLabel()
-
-        toolbar = QToolBar()
-        toolbar.setMovable(False)
-        toolbar.addWidget(self.title_label)
-
-        label_font = QFont("Lucida Console", 9)
-        self.land_label = QLabel("")
-        self.land_label.setFont(label_font)
-        self.mine_label = QLabel("")
-        self.mine_label.setFont(label_font)
-        self.time_label = QLabel("")
-        self.time_label.setFont(label_font)
-
-        toolbar_2 = QToolBar()
-        toolbar_2.setMovable(False)
-        toolbar_2.addWidget(self.land_label)
-
-        spacer_left = QWidget()
-        spacer_left.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        toolbar_2.addWidget(spacer_left)
-
-        toolbar_2.addWidget(self.mine_label)
-
-        spacer_right = QWidget()
-        spacer_right.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        toolbar_2.addWidget(spacer_right)
-
-        toolbar_2.addWidget(self.time_label)
-
-        self.addToolBar(toolbar)
-        self.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
-        self.addToolBar(toolbar_2)
-
-        self.update_timer = QTimer(self)
-        self.update_timer.timeout.connect(self.update_time_label)
-        self.update_timer.start(10)
-
     def update_title(self):
-        field = self.mine_field
+        field = self.game.mine_field
         self.title_label.setText(
             f"{field.field_width} X {field.field_height} with {field.mine_count} "
             f"({field.mine_count / (field.field_width * field.field_height) * 100:.2f}%) Mines "
@@ -1027,36 +1286,36 @@ class MainWindow(QMainWindow):
         empty_land_count = field.field_width * field.field_height \
             - field.revealed_land_count() - field.marked_land_count()
         self.land_label.setText(
-            f"{"L" if self.mine_field.field_width * BUTTON_SIZE < 350 else "Land"}:"
+            f"{"L" if field.field_width * BUTTON_SIZE < 350 else "Land"}:"
             f"{empty_land_count}/"
             f"{field.field_width * field.field_height}"
-            f"{"" if self.mine_field.field_width * BUTTON_SIZE < 320 else f" ({(
+            f"{"" if field.field_width * BUTTON_SIZE < 320 else f" ({(
                 100 * (empty_land_count - (field.mine_count - field.marked_land_count())) 
                 / empty_land_count) if empty_land_count > 0 else 0:2.2f}%)"}"
         )
         self.mine_label.setText(
-            f"{"M" if self.mine_field.field_width * BUTTON_SIZE < 350 else "Mine"}:"
+            f"{"M" if field.field_width * BUTTON_SIZE < 350 else "Mine"}:"
             f"{field.mine_count - field.marked_land_count()}/"
             f"{field.mine_count}"
-            f"{"" if self.mine_field.field_width * BUTTON_SIZE < 320 else f" ({(
+            f"{"" if field.field_width * BUTTON_SIZE < 320 else f" ({(
                 100 * (field.mine_count - field.marked_land_count()) 
                 / empty_land_count) if empty_land_count > 0 else 0:.2f}%)"}"
         )
 
     def update_time_label(self):
         time_delta = datetime.timedelta()
-        if self.game_start_time is not None:
-            if self.game_end_time is not None:
-                time_delta = self.game_end_time - self.game_start_time
+        if self.game.game_start_time is not None:
+            if self.game.game_end_time is not None:
+                time_delta = self.game.game_end_time - self.game.game_start_time
             else:
-                time_delta = datetime.datetime.now() - self.game_start_time
+                time_delta = datetime.datetime.now() - self.game.game_start_time
         display_second = time_delta.seconds
         display_milliseconds = time_delta.microseconds / 1000
         if time_delta.seconds > 999:
             display_second = 999
             display_milliseconds = 999
         self.time_label.setText(
-            f"{"T" if self.mine_field.field_width * BUTTON_SIZE < 350 else "Time"}:"
+            f"{"T" if self.game.mine_field.field_width * BUTTON_SIZE < 350 else "Time"}:"
             f"{display_second}.{math.floor(display_milliseconds / 10):02.0f}")
 
     def update_status_bar(self):
@@ -1075,7 +1334,7 @@ class MainWindow(QMainWindow):
         # g = self.geometry()
         # fg = self.frameGeometry()
         # rfg = fg.translated(-g.left(), -g.top())
-        # screen = self.app.primaryScreen()
+        # screen = self.game.ui_app.primaryScreen()
         # pixmap = QScreen.grabWindow(
         #     screen, win_id,
         #     rfg.left(), rfg.top(),
@@ -1087,43 +1346,29 @@ class MainWindow(QMainWindow):
         return pixmap
 
     def save(self, file_path, data=None):
-        pixmap = self.take_screenshot()
-        pixmap.save(file_path, "png")
-        if data is None:
-            data = self.mine_field.save()
-        with open(file_path, "ab") as f:
-            # json.dump(data, f, separators=(",", ":", ))
-            f.write(gzip.compress(json.dumps(data, separators=(",", ":", )).encode("utf-8")))
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
     def load(self, file_path):
-        with open(file_path, "rb") as f:
-            data = f.read()
-            iend_index = data.rfind(b'IEND') + len(b'IEND') + 4
-            # json_data = json.loads(data[iend_index:])
-            json_data = json.loads(gzip.decompress(data[iend_index:]))
-            self.game_terminated = False
-            self.mine_field.load(json_data)
-            self.update_title()
-            self.set_message(f"Load from {file_path.split("/")[-1]}")
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
-    def menu_re_init_mine_field(self):
-        self.stop_looper()
-        if not self.cheat_mode:
-            self.init_mine_field()
+    def menu_new_game_reset(self):
+        self.game.stop_looper()
+        if not self.game.cheat_mode:
+            self.game.new_game_setup()
         else:
-            self.mine_field.reset_mine_field()
-            self.game_terminated = False
+            self.game.mine_field.reset_mine_field()
+            self.game.game_terminated = False
 
-    def menu_init_mine_field(self, *args, **kwargs):
-        self.stop_looper()
+    def menu_new_game_setup(self, *args, **kwargs):
+        self.game.stop_looper()
         if "percent" in kwargs:
-            mine_count = int(self.mine_field.field_width * self.mine_field.field_height * kwargs["percent"])
+            mine_count = int(self.game.mine_field.field_width * self.game.mine_field.field_height * kwargs["percent"])
             kwargs["mine_count"] = mine_count
             del kwargs["percent"]
-        return self.init_mine_field(*args, **kwargs)
+        return self.game.new_game_setup(*args, **kwargs)
 
     def menu_custom_mine_field(self):
-        field_size = self.mine_field.field_size()
+        field_size = self.game.mine_field.field_size()
         dialog = CustomFieldDialog(
             self, field_size["field_width"], field_size["field_height"], field_size["mine_count"])
         dialog.exec()
@@ -1136,7 +1381,7 @@ class MainWindow(QMainWindow):
             "PNG (*.png);;All Files (*)"
         )
         if file_path:
-            self.save(file_path)
+            self.game.save(file_path)
 
     def menu_load(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1145,69 +1390,71 @@ class MainWindow(QMainWindow):
             filter="PNG (*.png);;All Files (*)",
         )
         if os.path.isfile(file_path):
-            self.load(file_path)
+            self.game.load(file_path)
 
     def menu_exit(self):
         self.close()
 
     def menu_bot_switch_auto_click(self):
-        self.stop_looper()
-        self.bot.auto_click = not self.bot.auto_click
-        print(f"AUTO_CLICK: {self.bot.auto_click}")
+        self.game.stop_looper()
+        self.game.bot.auto_click = not self.game.bot.auto_click
+        print(f"AUTO_CLICK: {self.game.bot.auto_click}")
 
     def menu_bot_switch_auto_mark(self):
-        self.stop_looper()
-        self.bot.auto_mark = not self.bot.auto_mark
-        print(f"AUTO_MARK: {self.bot.auto_mark}")
+        self.game.stop_looper()
+        self.game.bot.auto_mark = not self.game.bot.auto_mark
+        print(f"AUTO_MARK: {self.game.bot.auto_mark}")
 
     def menu_bot_switch_auto_random_click(self):
-        self.stop_looper()
+        self.game.stop_looper()
         # self.bot.auto_random_click = not self.bot.auto_random_click
-        if self.bot.random_step >= 0:
-            self.bot.random_step = -1  # unlimited
+        if self.game.bot.random_step >= 0:
+            self.game.bot.random_step = -1  # unlimited
         else:
-            self.bot.random_step = 0  # not allow
+            self.game.bot.random_step = 0  # not allow
 
-        print(f"AUTO_RAMDOM_CLICK: {self.bot.random_step == -1}")
+        print(f"AUTO_RAMDOM_CLICK: {self.game.bot.random_step == -1}")
 
     def menu_bot_random_click(self):
-        self.stop_looper()
-        if not MainWindow().game_terminated:
-            self.bot.random_click()
+        self.game.stop_looper()
+        if not self.game.game_terminated:
+            self.game.bot.random_click()
 
     def menu_bot_solve_once(self, allow_guess=False):
-        self.stop_looper()
-        if not MainWindow().game_terminated:
+        self.game.stop_looper()
+        if not self.game.game_terminated:
             if allow_guess:
-                self.start_bot(step=1, guess=1)
+                self.game.start_bot(step=1, guess=1)
             else:
-                self.start_bot(step=1)
+                self.game.start_bot(step=1)
 
     def menu_bot_solve(self):
-        self.stop_looper()
-        if not MainWindow().game_terminated:
-            self.bot.auto_click = True
+        self.game.stop_looper()
+        if not self.game.game_terminated:
+            self.game.bot.auto_click = True
             self.menu_action_dict["Auto Click"].setChecked(True)
-            self.bot.auto_mark = True
+            self.game.bot.auto_mark = True
             self.menu_action_dict["Auto Mark"].setChecked(True)
-            self.bot_stat.create_record()
-            self.start_bot()
+            self.game.bot_stat.create_record()
+            self.game.start_bot()
 
     def menu_bot_solve_looping(self):
-        if not self.bot_looper.looping:
-            self.start_looper()
+        if not self.game.bot_looper.looping:
+            if self.game.game_terminated:
+                self.game.new_game_setup()
+            self.game.start_looper()
         else:
-            self.stop_looper()
+            self.game.stop_looper()
 
     def menu_statistic(self):
-        self.statistic_dialog.refresh(self.bot_stat.record_list)
+        self.statistic_dialog.refresh(self.game.bot_stat.record_list)
         self.statistic_dialog.move(self.geometry().x() - 200, self.geometry().y() - 30)
         self.statistic_dialog.show()
         self.activateWindow()
 
     def menu_clear_statistic(self):
-        self.bot_stat.clear_record()
-        self.statistic_dialog.refresh(self.bot_stat.record_list)
+        self.game.bot_stat.clear_record()
+        self.statistic_dialog.refresh(self.game.bot_stat.record_list)
 
     @staticmethod
     def menu_about():
@@ -1225,29 +1472,7 @@ class MainWindow(QMainWindow):
         return menu_action
 
     def init_mine_field(self, field_width=0, field_height=0, mine_count=0):
-        if self.mine_field is not None:
-            field_size = self.mine_field.field_size()
-        else:
-            field_size = dict()
-        if field_width > 0:
-            field_size["field_width"] = field_width
-        if field_height > 0:
-            field_size["field_height"] = field_height
-        if mine_count > 0:
-            field_size["mine_count"] = mine_count
-
-        self.mine_field = MineField(self, **field_size)
-        self.game_terminated = False
-        self.game_start_time = None
-        self.game_end_time = None
-
-        self.setCentralWidget(self.mine_field)
-        self.adjustSize()
-        self.set_emote("")
-        self.set_message("New Game Ready")
-
-        if self.bot_looper is not None and self.bot_looper.looping:
-            self.bot_looper.status.map_ready.emit()  # --> bot_looper
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
     def keyPressEvent(self, event):
         # if event.key() < 256:
@@ -1258,43 +1483,43 @@ class MainWindow(QMainWindow):
         modifiers = QApplication.keyboardModifiers()
 
         if event.key() == Qt.Key.Key_U:
-            new_width = self.mine_field.field_width + 1
+            new_width = self.game.mine_field.field_width + 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
-                new_width = self.mine_field.field_width + 5
-            self.init_mine_field(field_width=new_width)
+                new_width = self.game.mine_field.field_width + 5
+            self.game.new_game_setup(field_width=new_width)
         elif event.key() == Qt.Key.Key_I:
-            new_width = self.mine_field.field_width - 1
+            new_width = self.game.mine_field.field_width - 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
-                new_width = self.mine_field.field_width - 5
-            self.init_mine_field(field_width=new_width)
+                new_width = self.game.mine_field.field_width - 5
+            self.game.new_game_setup(field_width=new_width)
 
         elif event.key() == Qt.Key.Key_J:
-            new_height = self.mine_field.field_height + 1
+            new_height = self.game.mine_field.field_height + 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
-                new_height = self.mine_field.field_height + 5
-            self.init_mine_field(field_height=new_height)
+                new_height = self.game.mine_field.field_height + 5
+            self.game.new_game_setup(field_height=new_height)
         elif event.key() == Qt.Key.Key_K:
-            new_height = self.mine_field.field_height - 1
+            new_height = self.game.mine_field.field_height - 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
-                new_height = self.mine_field.field_height - 5
-            self.init_mine_field(field_height=new_height)
+                new_height = self.game.mine_field.field_height - 5
+            self.game.new_game_setup(field_height=new_height)
 
         elif event.key() == Qt.Key.Key_M:
-            new_count = self.mine_field.mine_count + 1
+            new_count = self.game.mine_field.mine_count + 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
-                new_count = self.mine_field.mine_count + 5
-            self.init_mine_field(mine_count=new_count)
+                new_count = self.game.mine_field.mine_count + 5
+            self.game.new_game_setup(mine_count=new_count)
         elif event.key() == Qt.Key.Key_Period:
-            new_count = self.mine_field.mine_count - 1
+            new_count = self.game.mine_field.mine_count - 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
-                new_count = self.mine_field.mine_count - 5
-            self.init_mine_field(mine_count=new_count)
+                new_count = self.game.mine_field.mine_count - 5
+            self.game.new_game_setup(mine_count=new_count)
 
         elif event.key() == Qt.Key.Key_T:
-            self.cheat_mode = not self.cheat_mode
-            print(f"CHEAT_MODE: {self.cheat_mode}")
-            for land in self.mine_field.land_list:
-                land.update_tooltip(self.cheat_mode)
+            self.game.cheat_mode = not self.game.cheat_mode
+            print(f"CHEAT_MODE: {self.game.cheat_mode}")
+            for land in self.game.mine_field.land_list:
+                land.ui.update_tooltip(self.game.cheat_mode)
 
         elif event.key() == Qt.Key.Key_F and modifiers == Qt.KeyboardModifier.ControlModifier:
             print("allow_guess")
@@ -1310,7 +1535,7 @@ class MainWindow(QMainWindow):
         for url in event.mimeData().urls():
             file_path = url.toLocalFile()
             if os.path.isfile(file_path):
-                self.load(file_path)
+                self.game.load(file_path)
                 self.activateWindow()
                 break
 
@@ -1320,104 +1545,67 @@ class MainWindow(QMainWindow):
         self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
 
     def closeEvent(self, event):
-        self.stop_looper()
-        if self.bot and self.bot.auto_solving:
-            self.bot.result.stop_solving.emit()
+        self.game.stop_looper()
+        if self.game.bot and self.game.bot.auto_solving:
+            self.game.bot.result.stop_solving.emit()
         event.accept()
 
     def event(self, event):
-        if event.type() == QEvent.Type.WindowActivate:
-            self.ui_activated = True
-            self.ui_opacity = min(self.ui_opacity * 2, self.ui_opacity_max)
-            self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
-        elif event.type() == QEvent.Type.WindowDeactivate:
-            self.ui_activated = False
-            self.ui_opacity = max(1, int(self.ui_opacity / 2))
-            self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
-        return super().event(event)
+        if isinstance(event, QEvent):
+            if event.type() == QEvent.Type.WindowActivate:
+                self.ui_activated = True
+                self.ui_opacity = min(self.ui_opacity * 2, self.ui_opacity_max)
+                self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
+            elif event.type() == QEvent.Type.WindowDeactivate:
+                self.ui_activated = False
+                self.ui_opacity = max(1, int(self.ui_opacity / 2))
+                self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
+            return super().event(event)
+        else:
+            # print(event, event.__dir__(), event.__dict__)
+            # for attr in event.__dir__():
+            #     if "__" not in attr:
+            #         func = getattr(event, attr)
+            #         print(attr, func())
+            return False
 
     def start_bot(self, step=-1, guess=None):
-        self.bot.auto_step = step
-        if guess is not None:
-            self.bot.random_step = guess
-        if step == -1:
-            self.bot_stat.create_record()
-        self.bot_pool.start(self.bot)
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
     def bot_click(self, land):  # <-- bot
-        land.auto_click()
-        self.bot.result.game_update_completed.emit()  # --> bot
-        if self.bot.auto_solving:
-            self.bot_stat.record_click()
-            self.statistic_dialog.refresh(self.bot_stat.record_list)
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
     def bot_random_click(self, land):  # <-- bot
-        land.auto_click()
-        self.bot.result.game_update_completed.emit()  # --> bot
-        if self.bot.auto_solving:
-            self.bot_stat.record_random_click()
-            self.statistic_dialog.refresh(self.bot_stat.record_list)
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
     def bot_mark(self, land):  # <-- bot
-        land.auto_mark()
-        self.bot.result.game_update_completed.emit()  # --> bot
-        if self.bot.auto_solving:
-            self.bot_stat.record_mark()
-            self.statistic_dialog.refresh(self.bot_stat.record_list)
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
-    def bot_highlight(self, land, _type):
-        land.highlight(_type)
-        self.bot.result.game_update_completed.emit()  # --> bot
+    def bot_highlight(self, land, _type):  # <-- bot
+        land.ui.highlight(_type)
+        self.game.bot.result.game_update_completed.emit()  # --> bot
 
-    @staticmethod
-    def bot_custom_cover_ui(land, custom_cover, custom_color):
-        land.update_ui(custom_cover=custom_cover, custom_color=custom_color)
+    def bot_custom_cover_ui(self, land, custom_cover, custom_color):
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
     def bot_finished(self):  # <-- bot
-        self.bot_looper.status.bot_finished.emit()  # --> bot_looper
-        self.bot_stat.record_game_result(MainWindow().game_result)
-        self.statistic_dialog.refresh(self.bot_stat.record_list)
-        if self.game_terminated and self.game_result == "LOSE":
-            now = datetime.datetime.now()
-            if not os.path.isdir("screenshot"):
-                os.mkdir("screenshot")
-            file_path = f"screenshot/{now.strftime("%Y_%m_%d_%H_%M_%S_%f")}.png"
-            self.save(file_path, self.bot.data_before_solve)
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
     def start_looper(self):
-        self.bot.auto_click = True
-        self.menu_action_dict["Auto Click"].setChecked(True)
-        self.bot.auto_mark = True
-        self.menu_action_dict["Auto Mark"].setChecked(True)
-        # self.bot.auto_random_click = True
-        self.bot.random_step = -1
-        self.menu_action_dict["Auto Guess"].setChecked(True)
-        try:
-            self.bot_pool.start(self.bot_looper)
-        except RuntimeError:
-            self.bot_looper = BotLooper()
-            self.bot_looper.status.init_map.connect(self.init_mine_field)
-            self.bot_looper.status.start_bot.connect(self.start_bot)
-            self.bot_pool.start(self.bot_looper)
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
     def stop_looper(self):
-        if self.bot_looper is not None and self.bot_looper.looping:
-            self.bot_looper.status.stop_looping.emit()  # --> bot_looper
-            self.bot.result.stop_solving.emit()  # --> bot
-            self.statistic_dialog.refresh(self.bot_stat.record_list)
-            while self.bot_looper.looping:
-                pass
-            self.menu_action_dict["Solve Continuously"].setChecked(False)
+        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
 
 def main():
-    # import faulthandler
-    # faulthandler.enable()
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-    app.setPalette(dark_theme.PALETTE)
-    MainWindow(app).show()
-    sys.exit(app.exec())
+    Game().ui_setup()
+    Game().new_game_setup(
+        field_width=PRESET[0][0],
+        field_height=PRESET[0][1],
+        mine_count=PRESET[0][2],
+    )
+    Game().ui_wait_for_exit()
 
 
 class Bot(QRunnable):
@@ -1458,7 +1646,7 @@ class Bot(QRunnable):
         self.result.stop_solving.connect(self.stop_solving)
 
     def game_update_completed(self):
-        if MainWindow().game_terminated:
+        if Game().game_terminated:
             self.auto_solving = False
         self.game_updating = False
 
@@ -1470,7 +1658,7 @@ class Bot(QRunnable):
         self.auto_solving = True
         self.game_updating = False
         while self.auto_solving and self.auto_step != 0:
-            self.data_before_solve = MainWindow().mine_field.save()
+            self.data_before_solve = Game().mine_field.save()
             self.game_updating = True
             solve_success = self.solve()
             if not solve_success:
@@ -1497,7 +1685,7 @@ class Bot(QRunnable):
                 return False
         land_id, have_mine = self.analyse_condition()
         if land_id is not None:
-            land = MainWindow().mine_field.land(land_id)
+            land = Game().mine_field.land(land_id)
             if not have_mine:
                 if self.auto_click:
                     self.result.click.emit(land)
@@ -1521,7 +1709,7 @@ class Bot(QRunnable):
             self.result.emote.emit(":(")
             possible_mine_list, possible_safe_list, possibility_dict = self.analyse_possibility()
 
-            mine_field = MainWindow().mine_field
+            mine_field = Game().mine_field
             # if self.auto_random_click:
             if self.random_step == -1 or self.random_step > 0:
                 if self.random_step > 0:
@@ -1539,7 +1727,7 @@ class Bot(QRunnable):
 
                 # print("choice_list", len(choice_list))
 
-                if choice_list[0] in possibility_dict and possibility_dict[choice_list[0]] > 0.3:
+                if choice_list[0] in possibility_dict and possibility_dict[choice_list[0]] > 0.3:  # >= 1/3
                     mark_count = dict()
                     min_mark_count = mine_field.mine_count
                     for land_id in choice_list:
@@ -1560,7 +1748,7 @@ class Bot(QRunnable):
                 return False
 
     def collect_condition(self):
-        mine_field = MainWindow().mine_field
+        mine_field = Game().mine_field
         self.condition_list = list()
         self.condition_id_list = list()
         land_list = mine_field.land_list[:]
@@ -1593,7 +1781,7 @@ class Bot(QRunnable):
         shuffle(self.condition_list)
 
     def random_click(self, is_first_click=False, choice_list=None):
-        mine_field = MainWindow().mine_field
+        mine_field = Game().mine_field
         if choice_list is not None:
             land_list = [land for land in mine_field.land_list if land.id in choice_list]
         else:
@@ -1665,7 +1853,7 @@ class Bot(QRunnable):
         return None, None
 
     def analyse_possibility(self) -> (list, list, dict, ):
-        mine_field = MainWindow().mine_field
+        mine_field = Game().mine_field
         cover_land_count = mine_field.field_width * mine_field.field_height \
             - mine_field.revealed_land_count() - mine_field.marked_land_count()
         cover_mine_count = mine_field.mine_count - mine_field.marked_land_count()
@@ -1700,17 +1888,17 @@ class Bot(QRunnable):
                 .replace("0.", ".") \
                 .replace("1.00", "1.0")
             if land["mine_rate"] == max_mine_rate:
-                if MainWindow().ui_activated:
+                if Game().ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#e08080")
                 high_mine_rate_list.append(_id)
                 rate_dict[_id] = land["mine_rate"]
             elif land["mine_rate"] == min_mine_rate:
-                if MainWindow().ui_activated:
+                if Game().ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#80e080")
                 high_safe_rate_list.append(_id)
                 rate_dict[_id] = land["mine_rate"]
             else:
-                if MainWindow().ui_activated:
+                if Game().ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#909090")
         avg_cover = "{:.2f}" \
             .format(avg_mine_rate) \
@@ -1720,17 +1908,17 @@ class Bot(QRunnable):
             if land.checked or land.cover != SYMBOL_BLANK or land.id in all_adj_land_list:
                 continue
             if max_mine_rate == avg_mine_rate:
-                if MainWindow().ui_activated:
+                if Game().ui.ui_activated:
                     self.result.custom_cover_ui.emit(land, avg_cover, "#e08080")
                 high_mine_rate_list.append(land.id)
                 rate_dict[land.id] = avg_mine_rate
             elif min_mine_rate == avg_mine_rate:
-                if MainWindow().ui_activated:
+                if Game().ui.ui_activated:
                     self.result.custom_cover_ui.emit(land, avg_cover, "#80e080")
                 high_safe_rate_list.append(land.id)
                 rate_dict[land.id] = avg_mine_rate
             else:
-                if MainWindow().ui_activated:
+                if Game().ui.ui_activated:
                     self.result.custom_cover_ui.emit(land, avg_cover, "#909090")
 
         print(f"[bot] "
