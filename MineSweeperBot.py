@@ -86,6 +86,17 @@ COLOR_DICT = {
 BUTTON_SIZE = 20
 
 
+def singleton(cls):
+    instances = dict()
+
+    def get_instance(*args, **kwargs):
+        if cls not in instances:
+            instances[cls] = cls(*args, **kwargs)
+        return instances[cls]
+
+    return get_instance
+
+
 class Land(object):
     mine_field = None
 
@@ -401,17 +412,6 @@ class MineField(object):
         self.game.ui.setFixedHeight(106 + self.field_height * BUTTON_SIZE)
 
 
-def singleton(cls):
-    instances = dict()
-
-    def get_instance(*args, **kwargs):
-        if cls not in instances:
-            instances[cls] = cls(*args, **kwargs)
-        return instances[cls]
-
-    return get_instance
-
-
 @singleton
 class Game(object):
     game_terminated = False
@@ -433,7 +433,6 @@ class Game(object):
 
     def __init__(self):
         self.mine_field = MineField(self)
-        self.bot_stat = BotStat()
 
         self.bot = Bot()
         self.bot.result.click.connect(self.bot_click)
@@ -448,6 +447,8 @@ class Game(object):
 
         self.bot_pool = QThreadPool()
         self.bot_pool.setMaxThreadCount(20)
+
+        self.bot_stat = BotStat()
 
         self.ui_init()
 
@@ -568,6 +569,7 @@ class Game(object):
         self.ui_app.setPalette(dark_theme.PALETTE)
 
         self.ui = GameUI(self)
+        self.ui.show()
 
         self.mine_field.ui_init(self.ui)
 
@@ -576,7 +578,7 @@ class Game(object):
         self.bot.result.highlight.connect(self.ui.bot_highlight)
 
     def ui_setup(self):
-        self.ui.show()
+        pass
 
     def ui_wait_for_exit(self):
         sys.exit(self.ui_app.exec())
@@ -619,14 +621,8 @@ class LandUI(QPushButton):
     def left_click(self, chain=False):
         self.land.left_click(chain)
 
-    def auto_click(self):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
     def right_click(self):
         self.land.right_click()
-
-    def auto_mark(self):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
     def update_display(self, custom_cover=None, custom_color=None):
         style_sheet = self.style_sheet
@@ -664,23 +660,13 @@ class LandUI(QPushButton):
                         .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.5))
 
         self.setStyleSheet(style_sheet)
-        self.update_tooltip(Game().cheat_mode)
-
-        # if self.land.focus:
-        #     for _land in self.land.mine_field.land_list:
-        #         if _land == self:
-        #             continue
-        #         _land.focus = False
-        #         _land.ui.update_display()
+        self.update_tooltip(self.land.mine_field.game.cheat_mode)
 
     def update_tooltip(self, cheat_mode=False):
         if self.land.have_mine and cheat_mode:
             self.setToolTip(f"! ({self.land.x + 1}, {self.land.y + 1}) {self.land.id} !")
         else:
             self.setToolTip(f"({self.land.x + 1}, {self.land.y + 1}) {self.land.id}")
-
-    def to_string(self):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
     def highlight(self, _type):
         style_sheet = self.styleSheet()
@@ -689,12 +675,6 @@ class LandUI(QPushButton):
         elif _type == "safe":
             style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #20a020;")
         self.setStyleSheet(style_sheet)
-
-    def save(self):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def load(self, data):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
 
 class MineFieldUI(QWidget):
@@ -718,44 +698,11 @@ class MineFieldUI(QWidget):
         grid = self.layout()
         grid.addWidget(land, y, x)
 
-    def reset_mine_field(self):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def generate_mine(self, safe_x=-9, safe_y=-9):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def field_size(self):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def land(self, _id):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def revealed_land_count(self):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def marked_land_count(self):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def row_mark_count(self, _id):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def col_mark_count(self, _id):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def check_end_game(self, x, y):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
     def left_click(self):
         self.sender().left_click()
 
     def right_click(self):
         self.sender().right_click()
-
-    def save(self):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def load(self, data):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
 
 class NumberLineEdit(QLineEdit):
@@ -1345,12 +1292,6 @@ class GameUI(QMainWindow):
         pixmap = self.grab()
         return pixmap
 
-    def save(self, file_path, data=None):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def load(self, file_path):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
     def menu_new_game_reset(self):
         self.game.stop_looper()
         if not self.game.cheat_mode:
@@ -1471,9 +1412,6 @@ class GameUI(QMainWindow):
         self.menu_action_dict[title] = menu_action
         return menu_action
 
-    def init_mine_field(self, field_width=0, field_height=0, mine_count=0):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
     def keyPressEvent(self, event):
         # if event.key() < 256:
         #     print(chr(event.key()))
@@ -1563,43 +1501,15 @@ class GameUI(QMainWindow):
             return super().event(event)
         else:
             # print(event, event.__dir__(), event.__dict__)
-            # for attr in event.__dir__():
-            #     if "__" not in attr:
-            #         func = getattr(event, attr)
-            #         print(attr, func())
             return False
-
-    def start_bot(self, step=-1, guess=None):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def bot_click(self, land):  # <-- bot
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def bot_random_click(self, land):  # <-- bot
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def bot_mark(self, land):  # <-- bot
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
 
     def bot_highlight(self, land, _type):  # <-- bot
         land.ui.highlight(_type)
         self.game.bot.result.game_update_completed.emit()  # --> bot
 
-    def bot_custom_cover_ui(self, land, custom_cover, custom_color):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def bot_finished(self):  # <-- bot
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def start_looper(self):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
-    def stop_looper(self):
-        print("deprecated method:", getframeinfo(currentframe()).lineno, self)
-
 
 def main():
-    Game().ui_setup()
+    # Game().ui_setup()
     Game().new_game_setup(
         field_width=PRESET[0][0],
         field_height=PRESET[0][1],
