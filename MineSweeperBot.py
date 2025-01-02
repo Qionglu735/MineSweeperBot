@@ -30,9 +30,9 @@ except ImportError:
 # faulthandler.enable()
 
 PRESET = [
-    (9, 9, 10, "Easy", Qt.Key.Key_E, ),  # Easy, 12.35%
-    (16, 16, 40, "Moderate", Qt.Key.Key_W, ),  # Moderate, 15.62%
-    (30, 16, 99, "Hard", Qt.Key.Key_Q, ),  # Hard, 20.62%
+    (9, 9, 10, "Easy", QKeySequence("Ctrl+E"), ),  # Easy, 12.35%
+    (16, 16, 40, "Moderate", QKeySequence("Ctrl+W"), ),  # Moderate, 15.62%
+    (30, 16, 99, "Hard", QKeySequence("Ctrl+Q"), ),  # Hard, 20.62%
 ]
 
 FIELD_PRESET = [
@@ -83,7 +83,7 @@ COLOR_DICT = {
     "8": "#404040",
 }
 
-BUTTON_SIZE = 20
+BUTTON_SIZE_DEFAULT = 20
 
 
 def singleton(cls):
@@ -319,8 +319,19 @@ class MineField(object):
             "mine_count": self.mine_count,
         }
 
-    def land(self, _id):
-        return self.land_list[_id]
+    def land(self, _id=None, x=None, y=None):
+        if type(_id) is int:
+            return self.land_list[_id]
+        elif type(x) is int and type(y) is int:
+            x = max(0, min(x, self.field_width - 1))
+            y = max(0, min(y, self.field_height - 1))
+            return self.land_list[x + y * self.field_width]
+
+    def get_focus(self):
+        for land in self.land_list:
+            if land.focus is True:
+                return land
+        return None
 
     def revealed_land_count(self):
         return len([x for x in self.land_list if x.checked])
@@ -408,8 +419,8 @@ class MineField(object):
             self.ui.add_land(land.ui, land.y, land.x)
             land.ui_setup()
 
-        self.game.ui.setFixedWidth(20 + self.field_width * BUTTON_SIZE)
-        self.game.ui.setFixedHeight(106 + self.field_height * BUTTON_SIZE)
+        self.game.ui.setFixedWidth(20 + self.field_width * self.game.ui.button_size)
+        self.game.ui.setFixedHeight(106 + self.field_height * self.game.ui.button_size)
 
 
 @singleton
@@ -450,8 +461,6 @@ class Game(object):
 
         self.bot_stat = BotStat()
 
-        self.ui_init()
-
     def new_game_setup(self, field_width=0, field_height=0, mine_count=0):
         if field_width > 0:
             self.mine_field.field_width = field_width
@@ -466,11 +475,12 @@ class Game(object):
         self.game_start_time = None
         self.game_end_time = None
 
-        self.mine_field.ui_setup()
-        self.ui.setCentralWidget(self.mine_field.ui)
-        self.ui.adjustSize()
-        self.ui.set_emote("")
-        self.ui.set_message("New Game Ready")
+        if self.ui is not None:
+            self.mine_field.ui_setup()
+            self.ui.setCentralWidget(self.mine_field.ui)
+            self.ui.adjustSize()
+            self.ui.set_emote("")
+            self.ui.set_message("New Game Ready")
 
         if self.bot_looper is not None and self.bot_looper.looping:
             self.bot_looper.status.map_ready.emit()  # --> bot_looper
@@ -580,8 +590,13 @@ class Game(object):
     def ui_setup(self):
         pass
 
-    def ui_wait_for_exit(self):
-        sys.exit(self.ui_app.exec())
+    def wait_for_exit(self):
+        if self.ui_app is not None:
+            sys.exit(self.ui_app.exec())
+        else:
+            while not self.game_terminated:
+                pass
+            sys.exit()
 
 
 class LandUI(QPushButton):
@@ -610,13 +625,15 @@ class LandUI(QPushButton):
 
         self.land = land
 
-        self.setFixedSize(BUTTON_SIZE, BUTTON_SIZE)
+        button_size = self.land.mine_field.game.ui.button_size
+        self.setFixedSize(button_size, button_size)
         self.setStyleSheet(
             self.style_sheet
                 .replace("FONT_COLOR", "white")
-                .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6)))
+                .replace("FONT_SIZE", "{:.0f}px".format(button_size * 0.6)))
         self.setCheckable(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def left_click(self, chain=False):
         self.land.left_click(chain)
@@ -626,20 +643,22 @@ class LandUI(QPushButton):
 
     def update_display(self, custom_cover=None, custom_color=None):
         style_sheet = self.style_sheet
+        button_size = self.land.mine_field.game.ui.button_size
         if self.land.focus:
+            self.setFocus()
             style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #a3a323;")
         self.setChecked(self.land.checked)
         if self.land.checked:
             self.setText(self.land.content)
             style_sheet = style_sheet \
                 .replace("FONT_COLOR", COLOR_DICT[self.land.content]) \
-                .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6))
+                .replace("FONT_SIZE", "{:.0f}px".format(button_size * 0.6))
         else:
             if self.land.wrong_flag:
                 self.setText(SYMBOL_WRONG_FLAG)
                 style_sheet = style_sheet \
                     .replace("FONT_COLOR", COLOR_DICT[SYMBOL_WRONG_FLAG]) \
-                    .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6))
+                    .replace("FONT_SIZE", "{:.0f}px".format(button_size * 0.6))
             else:
                 cover = self.land.cover
                 if custom_cover is not None:
@@ -648,7 +667,7 @@ class LandUI(QPushButton):
                 if cover in COLOR_DICT:
                     style_sheet = style_sheet \
                         .replace("FONT_COLOR", COLOR_DICT[cover]) \
-                        .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.6))
+                        .replace("FONT_SIZE", "{:.0f}px".format(button_size * 0.6))
                 else:
                     if custom_color is not None:
                         self.custom_color = custom_color
@@ -657,7 +676,7 @@ class LandUI(QPushButton):
                         custom_color = "#ffffff"
                     style_sheet = style_sheet \
                         .replace("FONT_COLOR", custom_color) \
-                        .replace("FONT_SIZE", "{:.0f}px".format(BUTTON_SIZE * 0.5))
+                        .replace("FONT_SIZE", "{:.0f}px".format(button_size * 0.5))
 
         self.setStyleSheet(style_sheet)
         self.update_tooltip(self.land.mine_field.game.cheat_mode)
@@ -1054,6 +1073,7 @@ class StatisticDialog(QDialog):
 class GameUI(QMainWindow):
     game = None
 
+    button_size = BUTTON_SIZE_DEFAULT
     ui_activated = True
     ui_opacity_max = 1000
     ui_opacity = ui_opacity_max
@@ -1076,7 +1096,8 @@ class GameUI(QMainWindow):
 
     def init_window(self):
         self.setWindowTitle("MineSweeper")
-        self.setWindowFlags(Qt.WindowType.WindowMinimizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
+        # self.setWindowFlags(Qt.WindowType.WindowMinimizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
+        self.setWindowFlags(self.windowFlags() & Qt.WindowType.WindowCloseButtonHint)
         self.move(
             int(QApplication.primaryScreen().size().width() * 0.3),
             int(QApplication.primaryScreen().size().height() * 0.75),
@@ -1158,7 +1179,7 @@ class GameUI(QMainWindow):
         difficulty_menu.addAction(
             self.create_menu_action(
                 "&Custom...", "Custom field size and number of mines",
-                Qt.Key.Key_X, self.menu_custom_mine_field))
+                QKeySequence("Ctrl+A"), self.menu_custom_mine_field))
 
         game_menu.addSeparator()
         game_menu.addAction(
@@ -1180,15 +1201,15 @@ class GameUI(QMainWindow):
         bot_menu.addAction(
             self.create_menu_action(
                 "Auto Click", "Auto click if empty land found while solving",
-                Qt.Key.Key_A, self.menu_bot_switch_auto_click, check_able=True))
+                QKeySequence("Ctrl+Z"), self.menu_bot_switch_auto_click, check_able=True))
         bot_menu.addAction(
             self.create_menu_action(
                 "Auto Mark", "Auto click if empty land found while solving",
-                Qt.Key.Key_S, self.menu_bot_switch_auto_mark, check_able=True))
+                QKeySequence("Ctrl+X"), self.menu_bot_switch_auto_mark, check_able=True))
         bot_menu.addAction(
             self.create_menu_action(
                 "Auto Guess", "Auto guess if no conclusion found while solving",
-                Qt.Key.Key_D, self.menu_bot_switch_auto_random_click, check_able=True))
+                QKeySequence("Ctrl+C"), self.menu_bot_switch_auto_random_click, check_able=True))
         bot_menu.addSeparator()
         bot_menu.addAction(
             self.create_menu_action(
@@ -1214,7 +1235,7 @@ class GameUI(QMainWindow):
         bot_menu.addAction(
             self.create_menu_action(
                 "Clea&r Statistic", "Clear solving records",
-                QKeySequence("Ctrl+C"), trigger=self.menu_clear_statistic))
+                QKeySequence("Ctrl+D"), trigger=self.menu_clear_statistic))
 
         # Menu: About
         about_menu = menu.addMenu("&About")
@@ -1233,18 +1254,18 @@ class GameUI(QMainWindow):
         empty_land_count = field.field_width * field.field_height \
             - field.revealed_land_count() - field.marked_land_count()
         self.land_label.setText(
-            f"{"L" if field.field_width * BUTTON_SIZE < 350 else "Land"}:"
+            f"{"L" if field.field_width * self.button_size < 350 else "Land"}:"
             f"{empty_land_count}/"
             f"{field.field_width * field.field_height}"
-            f"{"" if field.field_width * BUTTON_SIZE < 320 else f" ({(
+            f"{"" if field.field_width * self.button_size < 320 else f" ({(
                 100 * (empty_land_count - (field.mine_count - field.marked_land_count())) 
                 / empty_land_count) if empty_land_count > 0 else 0:2.2f}%)"}"
         )
         self.mine_label.setText(
-            f"{"M" if field.field_width * BUTTON_SIZE < 350 else "Mine"}:"
+            f"{"M" if field.field_width * self.button_size < 350 else "Mine"}:"
             f"{field.mine_count - field.marked_land_count()}/"
             f"{field.mine_count}"
-            f"{"" if field.field_width * BUTTON_SIZE < 320 else f" ({(
+            f"{"" if field.field_width * self.button_size < 320 else f" ({(
                 100 * (field.mine_count - field.marked_land_count()) 
                 / empty_land_count) if empty_land_count > 0 else 0:.2f}%)"}"
         )
@@ -1262,7 +1283,7 @@ class GameUI(QMainWindow):
             display_second = 999
             display_milliseconds = 999
         self.time_label.setText(
-            f"{"T" if self.game.mine_field.field_width * BUTTON_SIZE < 350 else "Time"}:"
+            f"{"T" if self.game.mine_field.field_width * self.button_size < 350 else "Time"}:"
             f"{display_second}.{math.floor(display_milliseconds / 10):02.0f}")
 
     def update_status_bar(self):
@@ -1413,10 +1434,7 @@ class GameUI(QMainWindow):
         return menu_action
 
     def keyPressEvent(self, event):
-        # if event.key() < 256:
-        #     print(chr(event.key()))
-        # else:
-        #     print(event.key())
+        # print(event.key(), event.keyCombination().key().name)
 
         modifiers = QApplication.keyboardModifiers()
 
@@ -1463,6 +1481,39 @@ class GameUI(QMainWindow):
             print("allow_guess")
             self.menu_bot_solve_once(allow_guess=True)
 
+        elif event.key() == Qt.Key.Key_Z:
+            self.showMinimized()
+
+        elif event.key() in [
+            Qt.Key.Key_W, Qt.Key.Key_S, Qt.Key.Key_A, Qt.Key.Key_D,
+            Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Left, Qt.Key.Key_Right,
+        ]:
+            land_list = self.game.mine_field.land_list
+            focus_land = self.game.mine_field.get_focus()
+            if focus_land is None:
+                land_list[int(len(land_list) / 2)].focus = True
+                land_list[int(len(land_list) / 2)].ui.update_display()
+            else:
+                focus_land_new = focus_land
+                if event.key() in [Qt.Key.Key_W, Qt.Key.Key_Up]:
+                    focus_land_new = self.game.mine_field.land(x=focus_land.x, y=focus_land.y - 1)
+                elif event.key() in [Qt.Key.Key_S, Qt.Key.Key_Down]:
+                    focus_land_new = self.game.mine_field.land(x=focus_land.x, y=focus_land.y + 1)
+                elif event.key() in [Qt.Key.Key_A, Qt.Key.Key_Left]:
+                    focus_land_new = self.game.mine_field.land(x=focus_land.x - 1, y=focus_land.y)
+                elif event.key() in [Qt.Key.Key_D, Qt.Key.Key_Right]:
+                    focus_land_new = self.game.mine_field.land(x=focus_land.x + 1, y=focus_land.y)
+                if focus_land_new != focus_land:
+                    focus_land.focus = False
+                    focus_land_new.focus = True
+                    focus_land.ui.update_display()
+                    focus_land_new.ui.update_display()
+
+        elif event.key() == Qt.Key.Key_X:
+            focus_land = self.game.mine_field.get_focus()
+            if focus_land is not None:
+                focus_land.ui.right_click()
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.accept()
@@ -1479,8 +1530,13 @@ class GameUI(QMainWindow):
 
     def wheelEvent(self, event):
         angle_delta = event.angleDelta().y()
-        self.ui_opacity = max(1, min(self.ui_opacity + int(angle_delta / 5), self.ui_opacity_max))
-        self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers == Qt.KeyboardModifier.ControlModifier:
+            self.button_size = max(1, self.button_size + int(angle_delta / abs(angle_delta)))
+            self.game.mine_field.ui_setup()
+        else:
+            self.ui_opacity = max(2, min(self.ui_opacity + int(angle_delta / 5), self.ui_opacity_max))
+            self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
 
     def closeEvent(self, event):
         self.game.stop_looper()
@@ -1509,13 +1565,14 @@ class GameUI(QMainWindow):
 
 
 def main():
-    # Game().ui_setup()
-    Game().new_game_setup(
+    game = Game()
+    game.ui_init()
+    game.new_game_setup(
         field_width=PRESET[0][0],
         field_height=PRESET[0][1],
         mine_count=PRESET[0][2],
     )
-    Game().ui_wait_for_exit()
+    game.wait_for_exit()
 
 
 class Bot(QRunnable):
