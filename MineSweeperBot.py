@@ -30,6 +30,7 @@ except ImportError:
 # faulthandler.enable()
 
 PRESET = [
+    # (3, 3, 1, "Debug", QKeySequence("Ctrl+Tab"), ),  # Debug
     (9, 9, 10, "Easy", QKeySequence("Ctrl+E"), ),  # Easy, 12.35%
     (16, 16, 40, "Moderate", QKeySequence("Ctrl+W"), ),  # Moderate, 15.62%
     (30, 16, 99, "Hard", QKeySequence("Ctrl+Q"), ),  # Hard, 20.62%
@@ -55,7 +56,7 @@ DIFFICULTY_PRESET = [
     (0.24, "Brutal", ),
 ]
 
-MIN_WIDTH = 9
+MIN_WIDTH = 3
 MAX_WIDTH = 1000
 
 MIN_HEIGHT = 3
@@ -83,6 +84,7 @@ COLOR_DICT = {
     "8": "#404040",
 }
 
+SAFETY_LEVEL_DEFAULT = 1
 BUTTON_SIZE_DEFAULT = 20
 
 
@@ -130,15 +132,20 @@ class Land(object):
             self.ui.setChecked(self.checked)
             return
 
+        if not chain:
+            # print(f"Click ({self.x}, {self.y})")
+            if len([x for x in self.mine_field.land_list if x.have_mine is True]) == 0:
+                if self.mine_field.game.safety_level >= 1:
+                    # first click always safe
+                    self.mine_field.generate_mine(self.x, self.y)
+                else:
+                    self.mine_field.generate_mine()
+
         self.checked = True
-        # if not chain:
-        #     print(f"Click ({self.x}, {self.y})")
-        if len([x for x in self.mine_field.land_list if x.have_mine is True]) == 0:
-            # first click always safe
-            self.mine_field.generate_mine(self.x, self.y)
 
         # check if click on mine
         self.mine_field.check_end_game(self.x, self.y)
+
         if not self.mine_field.game.game_terminated:
             flag_num = 0
             for x, y in itertools.product([-1, 0, 1], [-1, 0, 1]):
@@ -161,6 +168,11 @@ class Land(object):
                             land.left_click(chain=True)
 
         if not chain:
+            if self.mine_field.game.safety_level >= 2:
+                for _land in self.mine_field.land_list:
+                    if _land.checked is False and _land.content == SYMBOL_BLANK:
+                        _land.left_click(chain=True)
+
             self.focus = True
             self.ui.update_display()
 
@@ -273,6 +285,7 @@ class MineField(object):
         for land in self.land_list:
             land.cover = SYMBOL_BLANK
             land.checked = False
+            land.focus = False
             land.ui.update_display()
 
     def generate_mine(self, safe_x=-9, safe_y=-9):
@@ -429,6 +442,7 @@ class Game(object):
     game_start_time = None
     game_end_time = None
     game_result = None
+    safety_level = SAFETY_LEVEL_DEFAULT
     cheat_mode = False
 
     mine_field = None
@@ -1097,10 +1111,10 @@ class GameUI(QMainWindow):
     def init_window(self):
         self.setWindowTitle("MineSweeper")
         # self.setWindowFlags(Qt.WindowType.WindowMinimizeButtonHint | Qt.WindowType.WindowCloseButtonHint)
-        self.setWindowFlags(self.windowFlags() & Qt.WindowType.WindowCloseButtonHint)
+        self.setWindowFlags(Qt.WindowType.WindowCloseButtonHint)
         self.move(
-            int(QApplication.primaryScreen().size().width() * 0.3),
-            int(QApplication.primaryScreen().size().height() * 0.75),
+            int(QApplication.primaryScreen().size().width() * 0.37),
+            int(QApplication.primaryScreen().size().height() * 0.73),
         )
         self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "Mine.ico")))
 
@@ -1214,7 +1228,7 @@ class GameUI(QMainWindow):
         bot_menu.addAction(
             self.create_menu_action(
                 "&Guess Once", "Auto click a random unmarked land",
-                Qt.Key.Key_B, self.menu_bot_random_click))
+                Qt.Key.Key_G, self.menu_bot_random_click))
         bot_menu.addAction(
             self.create_menu_action(
                 "Solve Onc&e", "Try to solve current game one step",
@@ -1222,7 +1236,7 @@ class GameUI(QMainWindow):
         bot_menu.addAction(
             self.create_menu_action(
                 "Solve &Current Game", "Try to solve current game until win or lose",
-                Qt.Key.Key_G, self.menu_bot_solve))
+                Qt.Key.Key_B, self.menu_bot_solve))
         bot_menu.addAction(
             self.create_menu_action(
                 "Solve Continuously", "Auto start new games and solve them continuously",
@@ -1237,6 +1251,20 @@ class GameUI(QMainWindow):
                 "Clea&r Statistic", "Clear solving records",
                 QKeySequence("Ctrl+D"), trigger=self.menu_clear_statistic))
 
+        # Menu: Option
+        option_menu = menu.addMenu("&Option")
+        option_menu.addAction(
+            self.create_menu_action(
+                "Safety First", "First click always safe",
+                None, self.menu_safety_first,
+                check_able=True, checked=(self.game.safety_level >= 1)))
+        option_menu.addAction(
+            self.create_menu_action(
+                "Protective Measure", "Reveal all safe area",
+                None, self.menu_protective_measure,
+                check_able=True, checked=(self.game.safety_level >= 2)))
+        option_menu.addSeparator()
+
         # Menu: About
         about_menu = menu.addMenu("&About")
         about_menu.addAction(
@@ -1246,29 +1274,57 @@ class GameUI(QMainWindow):
 
     def update_title(self):
         field = self.game.mine_field
-        self.title_label.setText(
-            f"{field.field_width} X {field.field_height} with {field.mine_count} "
-            f"({field.mine_count / (field.field_width * field.field_height) * 100:.2f}%) Mines "
+        title_string = \
+            f"{field.field_width} X {field.field_height} with {field.mine_count} " \
+            f"({field.mine_count / (field.field_width * field.field_height) * 100:.2f}%) Mines " \
             f"{self.emote}"
-        )
+        self.title_label.setText(title_string)
+        self.title_label.setToolTip(title_string)
+
         empty_land_count = field.field_width * field.field_height \
             - field.revealed_land_count() - field.marked_land_count()
+        empty_land_rate = 0
+        if empty_land_count > 0:
+            empty_land_rate = 100 * (empty_land_count - (field.mine_count - field.marked_land_count())) \
+                              / empty_land_count
+        mine_rate = 0
+        if empty_land_count > 0:
+            mine_rate = 100 * (field.mine_count - field.marked_land_count()) \
+                        / empty_land_count
+
+        if field.field_width * self.button_size < 80:
+            land_string_label = "L"
+            mine_string_label = "M"
+        elif field.field_width * self.button_size < 110:
+            land_string_label = "Land"
+            mine_string_label = "Mine"
+        elif field.field_width * self.button_size < 350:
+            land_string_label = "L"
+            mine_string_label = "M"
+        else:
+            land_string_label = "Land"
+            mine_string_label = "Mine"
+        if field.field_width * self.button_size < 110:
+            land_string_data = ""
+            mine_string_data = ""
+        else:
+            land_string_data = f":{empty_land_count}/{field.field_width * field.field_height}"
+            mine_string_data = f":{field.mine_count - field.marked_land_count()}/{field.mine_count}"
+        if field.field_width * self.button_size < 280:
+            land_string_rate = ""
+            mine_string_rate = ""
+        else:
+            land_string_rate = f" ({empty_land_rate:.2f}%)"
+            mine_string_rate = f" ({mine_rate:.2f}%)"
+
         self.land_label.setText(
-            f"{"L" if field.field_width * self.button_size < 350 else "Land"}:"
-            f"{empty_land_count}/"
-            f"{field.field_width * field.field_height}"
-            f"{"" if field.field_width * self.button_size < 320 else f" ({(
-                100 * (empty_land_count - (field.mine_count - field.marked_land_count())) 
-                / empty_land_count) if empty_land_count > 0 else 0:2.2f}%)"}"
-        )
+            f"{land_string_label}{land_string_data}{land_string_rate}")
+        self.land_label.setToolTip(
+            f"Land:{empty_land_count}/{field.field_width * field.field_height} ({empty_land_rate:.2f}%)")
         self.mine_label.setText(
-            f"{"M" if field.field_width * self.button_size < 350 else "Mine"}:"
-            f"{field.mine_count - field.marked_land_count()}/"
-            f"{field.mine_count}"
-            f"{"" if field.field_width * self.button_size < 320 else f" ({(
-                100 * (field.mine_count - field.marked_land_count()) 
-                / empty_land_count) if empty_land_count > 0 else 0:.2f}%)"}"
-        )
+            f"{mine_string_label}{mine_string_data}{mine_string_rate}")
+        self.mine_label.setToolTip(
+            f"Mine:{field.mine_count - field.marked_land_count()} / {field.mine_count} ({mine_rate:.2f}%)")
 
     def update_time_label(self):
         time_delta = datetime.timedelta()
@@ -1282,9 +1338,25 @@ class GameUI(QMainWindow):
         if time_delta.seconds > 999:
             display_second = 999
             display_milliseconds = 999
+
+        field = self.game.mine_field
+        if field.field_width * self.button_size < 80:
+            time_string_label = "T"
+        elif field.field_width * self.button_size < 110:
+            time_string_label = "Time"
+        elif field.field_width * self.button_size < 350:
+            time_string_label = "T"
+        else:
+            time_string_label = "Time"
+        if field.field_width * self.button_size < 110:
+            time_string_data = ""
+        else:
+            time_string_data = f":{display_second}.{math.floor(display_milliseconds / 10):02.0f}"
+
         self.time_label.setText(
-            f"{"T" if self.game.mine_field.field_width * self.button_size < 350 else "Time"}:"
-            f"{display_second}.{math.floor(display_milliseconds / 10):02.0f}")
+            f"{time_string_label}{time_string_data}")
+        self.time_label.setToolTip(
+            f"Time:{time_string_data}")
 
     def update_status_bar(self):
         self.statusBar().showMessage(self.status)
@@ -1418,11 +1490,28 @@ class GameUI(QMainWindow):
         self.game.bot_stat.clear_record()
         self.statistic_dialog.refresh(self.game.bot_stat.record_list)
 
+    def menu_safety_first(self):
+        if self.menu_action_dict["Safety First"].isChecked() is True:
+            self.game.safety_level = 1
+        else:
+            self.game.safety_level = 0
+            self.menu_action_dict["Protective Measure"].setChecked(False)
+
+    def menu_protective_measure(self):
+        if self.menu_action_dict["Protective Measure"].isChecked() is True:
+            self.game.safety_level = 2
+            self.menu_action_dict["Safety First"].setChecked(True)
+        else:
+            if self.menu_action_dict["Safety First"].isChecked() is True:
+                self.game.safety_level = 1
+            else:
+                self.game.safety_level = 0
+
     @staticmethod
     def menu_about():
         webbrowser.open("https://github.com/Qionglu735/MineSweeperBot")
 
-    def create_menu_action(self, title, status_tip, short_cut=None, trigger=None, check_able=None):
+    def create_menu_action(self, title, status_tip, short_cut=None, trigger=None, check_able=None, checked=False):
         menu_action = QAction(title, self)
         menu_action.setStatusTip(status_tip)
         if short_cut is not None:
@@ -1430,6 +1519,8 @@ class GameUI(QMainWindow):
         menu_action.triggered.connect(trigger)
         if check_able is not None:
             menu_action.setCheckable(check_able)
+            if checked is True:
+                menu_action.setChecked(True)
         self.menu_action_dict[title] = menu_action
         return menu_action
 
@@ -1465,7 +1556,7 @@ class GameUI(QMainWindow):
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_count = self.game.mine_field.mine_count + 5
             self.game.new_game_setup(mine_count=new_count)
-        elif event.key() == Qt.Key.Key_Period:
+        elif event.key() == Qt.Key.Key_Comma:
             new_count = self.game.mine_field.mine_count - 1
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_count = self.game.mine_field.mine_count - 5
@@ -1534,6 +1625,8 @@ class GameUI(QMainWindow):
         if modifiers == Qt.KeyboardModifier.ControlModifier:
             self.button_size = max(1, self.button_size + int(angle_delta / abs(angle_delta)))
             self.game.mine_field.ui_setup()
+            self.update_title()
+            self.update_time_label()
         else:
             self.ui_opacity = max(2, min(self.ui_opacity + int(angle_delta / 5), self.ui_opacity_max))
             self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
