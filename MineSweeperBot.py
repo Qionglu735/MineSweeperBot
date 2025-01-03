@@ -485,9 +485,7 @@ class Game(object):
 
         self.mine_field.init_mine_field()
 
-        self.game_terminated = False
-        self.game_start_time = None
-        self.game_end_time = None
+        self.reset_status()
 
         if self.ui is not None:
             self.mine_field.ui_setup()
@@ -498,6 +496,12 @@ class Game(object):
 
         if self.bot_looper is not None and self.bot_looper.looping:
             self.bot_looper.status.map_ready.emit()  # --> bot_looper
+
+    def reset_status(self):
+        self.game_terminated = False
+        self.game_start_time = None
+        self.game_end_time = None
+        self.game_result = None
 
     def save(self, file_path, data=None):
         pixmap = self.ui.take_screenshot()
@@ -512,8 +516,8 @@ class Game(object):
             data = f.read()
             iend_index = data.rfind(b'IEND') + len(b'IEND') + 4
             json_data = json.loads(gzip.decompress(data[iend_index:]))
-            self.game_terminated = False
             self.mine_field.load(json_data)
+            self.reset_status()
             self.mine_field.ui_setup()
             self.ui.update_title()
             self.ui.set_message(f"Load from {file_path.split("/")[-1]}")
@@ -624,7 +628,7 @@ class LandUI(QPushButton):
             font-size: FONT_SIZE;
             font-weight: bold;
             /* BORDER_STYLE */
-            background-color: #292929;
+            /* BACKGROUND_STYLE */
         }
         QPushButton:pressed {
             border: 2px solid #797917;
@@ -661,6 +665,10 @@ class LandUI(QPushButton):
         if self.land.focus:
             self.setFocus()
             style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #a3a323;")
+        if self.land.mine_field.game.cheat_mode and self.land.content == SYMBOL_MINE:
+            style_sheet = style_sheet.replace("/* BACKGROUND_STYLE */", "background-color: #432929;")
+        else:
+            style_sheet = style_sheet.replace("/* BACKGROUND_STYLE */", "background-color: #292929;")
         self.setChecked(self.land.checked)
         if self.land.checked:
             self.setText(self.land.content)
@@ -693,13 +701,10 @@ class LandUI(QPushButton):
                         .replace("FONT_SIZE", "{:.0f}px".format(button_size * 0.5))
 
         self.setStyleSheet(style_sheet)
-        self.update_tooltip(self.land.mine_field.game.cheat_mode)
+        self.update_tooltip()
 
-    def update_tooltip(self, cheat_mode=False):
-        if self.land.have_mine and cheat_mode:
-            self.setToolTip(f"! ({self.land.x + 1}, {self.land.y + 1}) {self.land.id} !")
-        else:
-            self.setToolTip(f"({self.land.x + 1}, {self.land.y + 1}) {self.land.id}")
+    def update_tooltip(self):
+        self.setToolTip(f"({self.land.x + 1}, {self.land.y + 1}) {self.land.id}")
 
     def highlight(self, _type):
         style_sheet = self.styleSheet()
@@ -1167,7 +1172,11 @@ class GameUI(QMainWindow):
         game_menu.addAction(
             self.create_menu_action(
                 "New &Game", "Start a new game",
-                Qt.Key.Key_R, self.menu_new_game_reset))
+                Qt.Key.Key_R, self.menu_new_game_setup))
+        game_menu.addAction(
+            self.create_menu_action(
+                "Reset &Game", "Reset current game",
+                QKeySequence("Ctrl+R"), self.menu_new_game_reset))
         game_menu.addSeparator()
         for preset in PRESET:
             game_menu.addAction(
@@ -1387,11 +1396,8 @@ class GameUI(QMainWindow):
 
     def menu_new_game_reset(self):
         self.game.stop_looper()
-        if not self.game.cheat_mode:
-            self.game.new_game_setup()
-        else:
-            self.game.mine_field.reset_mine_field()
-            self.game.game_terminated = False
+        self.game.mine_field.reset_mine_field()
+        self.game.reset_status()
 
     def menu_new_game_setup(self, *args, **kwargs):
         self.game.stop_looper()
@@ -1566,7 +1572,8 @@ class GameUI(QMainWindow):
             self.game.cheat_mode = not self.game.cheat_mode
             print(f"CHEAT_MODE: {self.game.cheat_mode}")
             for land in self.game.mine_field.land_list:
-                land.ui.update_tooltip(self.game.cheat_mode)
+                # land.ui.update_tooltip(self.game.cheat_mode)
+                land.ui.update_display()
 
         elif event.key() == Qt.Key.Key_F and modifiers == Qt.KeyboardModifier.ControlModifier:
             print("allow_guess")
@@ -1734,7 +1741,7 @@ class Bot(QRunnable):
     def solve(self):
         self.collect_condition()
         # print("[Bot] Try to analyse ...")
-        if len(self.condition_list) == 0:
+        if len(self.condition_list) == 1:
             if self.auto_click:
                 self.result.emote.emit(":D")
                 return self.random_click(is_first_click=True)
@@ -1813,6 +1820,12 @@ class Bot(QRunnable):
         self.condition_id_list = list()
         land_list = mine_field.land_list[:]
         # shuffle(land_list)
+        global_cond = {
+            "id": "",
+            "land": -9,
+            "possible_mine": mine_field.mine_count - mine_field.marked_land_count(),
+            "adj_land": list(),
+        }
         for land in land_list:
             if land.checked and land.adjacent_mine_count != 0:
                 x, y = land.x, land.y
@@ -1835,6 +1848,10 @@ class Bot(QRunnable):
 
                 if condition["possible_mine"] > 0 or len(condition["adj_land"]) > 0:
                     self.condition_list.append(condition)
+            if not land.checked and land.cover != SYMBOL_FLAG:
+                global_cond["adj_land"].append(land.id)
+        self.condition_list.append(global_cond)
+
         for cond in self.condition_list:
             cond["id"] = f"{cond["land"]}:{",".join([str(x) for x in cond["adj_land"]])}"
             self.condition_id_list.append(cond["id"])
@@ -1926,19 +1943,59 @@ class Bot(QRunnable):
                     all_adj_land_list[land] = {
                         "id": land,
                         "mine_rate": avg_mine_rate,
+
+                        "mine_rate_v1": avg_mine_rate,
+                        "mine_rate_v1_history": [(avg_mine_rate, "None", )],
+                        "mine_rate_v2": avg_mine_rate,
+                        "mine_rate_v2_history": [(avg_mine_rate, "None", )],
+                        "mine_rate_v3": avg_mine_rate,
+                        "mine_rate_v3_history": [(avg_mine_rate, "None", )],
                     }
         for condition in self.condition_list:
             cond_mine_rate = condition["possible_mine"] / len(condition["adj_land"])
             for land in condition["adj_land"]:
-                if cond_mine_rate >= 0.5:
-                    if cond_mine_rate > all_adj_land_list[land]["mine_rate"]:
-                        all_adj_land_list[land]["mine_rate"] = cond_mine_rate
+                # # version_1
+                # if cond_mine_rate >= 0.5:
+                #     if cond_mine_rate > all_adj_land_list[land]["mine_rate_v1"]:
+                #         all_adj_land_list[land]["mine_rate_v1"] = cond_mine_rate
+                #         all_adj_land_list[land]["mine_rate_v1_history"].append((cond_mine_rate, condition["id"], ))
+                # else:
+                #     if all_adj_land_list[land]["mine_rate_v1"] >= 0.5:
+                #         pass
+                #     elif abs(cond_mine_rate - avg_mine_rate) \
+                #             > abs(all_adj_land_list[land]["mine_rate_v1"] - avg_mine_rate):
+                #         all_adj_land_list[land]["mine_rate_v1"] = cond_mine_rate
+                #         all_adj_land_list[land]["mine_rate_v1_history"].append((cond_mine_rate, condition["id"], ))
+                #
+                # # version_2
+                # if abs(cond_mine_rate - avg_mine_rate) > abs(all_adj_land_list[land]["mine_rate_v2"] - avg_mine_rate):
+                #     all_adj_land_list[land]["mine_rate_v2"] = cond_mine_rate
+                #     all_adj_land_list[land]["mine_rate_v2_history"].append((cond_mine_rate, condition["id"], ))
+
+                # version_3
+                cond_confident = abs(cond_mine_rate - avg_mine_rate)
+                if cond_mine_rate < avg_mine_rate:
+                    cond_confident /= avg_mine_rate
                 else:
-                    if all_adj_land_list[land]["mine_rate"] >= 0.5:
-                        pass
-                    elif abs(cond_mine_rate - avg_mine_rate) > abs(all_adj_land_list[land]["mine_rate"] - avg_mine_rate):
-                        all_adj_land_list[land]["mine_rate"] = cond_mine_rate
-        for _id, land in all_adj_land_list.items():
+                    cond_confident /= 0.8 - avg_mine_rate
+                record_confident = abs(all_adj_land_list[land]["mine_rate_v3"] - avg_mine_rate)
+                if all_adj_land_list[land]["mine_rate_v3"] < avg_mine_rate:
+                    record_confident /= avg_mine_rate
+                else:
+                    record_confident /= 0.8 - avg_mine_rate
+                if cond_confident > record_confident:
+                    all_adj_land_list[land]["mine_rate_v3"] = cond_mine_rate
+                    all_adj_land_list[land]["mine_rate_v3_history"].append((cond_mine_rate, condition["id"], ))
+
+                # version selection
+                all_adj_land_list[land]["mine_rate"] = all_adj_land_list[land]["mine_rate_v3"]
+
+        for _, land in all_adj_land_list.items():
+            # if not (land["mine_rate_v1"] == land["mine_rate_v2"] == land["mine_rate_v3"]):
+            #     print("::::", land["id"], Game().mine_field.land(land["id"]).content == SYMBOL_MINE)
+            #     print("v1", land["mine_rate_v1"], land["mine_rate_v1_history"])
+            #     print("v2", land["mine_rate_v2"], land["mine_rate_v2_history"])
+            #     print("v3", land["mine_rate_v3"], land["mine_rate_v3_history"])
             max_mine_rate = max(max_mine_rate, land["mine_rate"])
             min_mine_rate = min(min_mine_rate, land["mine_rate"])
         high_mine_rate_list, high_safe_rate_list, rate_dict = list(), list(), dict()
@@ -1982,6 +2039,7 @@ class Bot(QRunnable):
                     self.result.custom_cover_ui.emit(land, avg_cover, "#909090")
 
         print(f"[bot] "
+              f"cond_list: {len(self.condition_list)}, "
               f"possible_mine_list: {len(high_mine_rate_list)} ({max_mine_rate:.2f}), "
               f"possible_safe_list: {len(high_safe_rate_list)} ({min_mine_rate:.2f}), "
               f"avg: {avg_mine_rate:.2f}")
