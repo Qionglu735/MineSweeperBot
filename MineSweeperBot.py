@@ -515,12 +515,15 @@ class Game(object):
         with open(file_path, "rb") as f:
             data = f.read()
             iend_index = data.rfind(b'IEND') + len(b'IEND') + 4
-            json_data = json.loads(gzip.decompress(data[iend_index:]))
-            self.mine_field.load(json_data)
-            self.reset_status()
-            self.mine_field.ui_setup()
-            self.ui.update_title()
-            self.ui.set_message(f"Load from {file_path.split("/")[-1]}")
+            try:
+                json_data = json.loads(gzip.decompress(data[iend_index:]))
+                self.mine_field.load(json_data)
+                self.reset_status()
+                self.mine_field.ui_setup()
+                self.ui.update_title()
+                self.ui.set_message(f"Load from {file_path.split("/")[-1]}")
+            except gzip.BadGzipFile:
+                pass
 
     def start_bot(self, step=-1, guess=None):
         self.bot.auto_step = step
@@ -1698,6 +1701,7 @@ class Bot(QRunnable):
 
     auto_solving = False
     condition_list = list()
+    # global_condition = None
     condition_id_list = list()
     result = None
 
@@ -1741,7 +1745,7 @@ class Bot(QRunnable):
     def solve(self):
         self.collect_condition()
         # print("[Bot] Try to analyse ...")
-        if len(self.condition_list) == 1:
+        if all([land.checked is False for land in Game().mine_field.land_list]):
             if self.auto_click:
                 self.result.emote.emit(":D")
                 return self.random_click(is_first_click=True)
@@ -1820,12 +1824,13 @@ class Bot(QRunnable):
         self.condition_id_list = list()
         land_list = mine_field.land_list[:]
         # shuffle(land_list)
-        global_cond = {
-            "id": "",
-            "land": -9,
-            "possible_mine": mine_field.mine_count - mine_field.marked_land_count(),
-            "adj_land": list(),
-        }
+        # self.global_condition = {
+        #     "id": "",
+        #     "land": -9,
+        #     "possible_mine": mine_field.mine_count - mine_field.marked_land_count(),
+        #     "adj_land": list(),
+        #     "type": "global",
+        # }
         for land in land_list:
             if land.checked and land.adjacent_mine_count != 0:
                 x, y = land.x, land.y
@@ -1834,6 +1839,7 @@ class Bot(QRunnable):
                     "land": land.id,
                     "possible_mine": land.adjacent_mine_count,
                     "adj_land": list(),
+                    "type": "origin",
                 }
                 for _x, _y in itertools.product([-1, 0, 1], [-1, 0, 1]):
                     if _x == 0 and _y == 0:
@@ -1848,14 +1854,18 @@ class Bot(QRunnable):
 
                 if condition["possible_mine"] > 0 or len(condition["adj_land"]) > 0:
                     self.condition_list.append(condition)
-            if not land.checked and land.cover != SYMBOL_FLAG:
-                global_cond["adj_land"].append(land.id)
-        self.condition_list.append(global_cond)
+            # if not land.checked and land.cover != SYMBOL_FLAG:
+            #     self.global_condition["adj_land"].append(land.id)
+
+        # self.condition_list.append(global_cond)
 
         for cond in self.condition_list:
             cond["id"] = f"{cond["land"]}:{",".join([str(x) for x in cond["adj_land"]])}"
             self.condition_id_list.append(cond["id"])
         shuffle(self.condition_list)
+
+        # self.global_condition["id"] = \
+        #     f"{self.global_condition["land"]}:{",".join([str(x) for x in self.global_condition["adj_land"]])}"
 
     def random_click(self, is_first_click=False, choice_list=None):
         mine_field = Game().mine_field
@@ -1876,6 +1886,7 @@ class Bot(QRunnable):
         return True
 
     def analyse_condition(self):
+        global_condition_added = False
         while True:
             for condition in self.condition_list:
                 if condition["possible_mine"] == 0:
@@ -1906,9 +1917,11 @@ class Bot(QRunnable):
                         elif len(cond_a_new_adj) > 0:
                             cond_a_new = cond_a.copy()
                             cond_a_new.update({
-                                "id": f"sub_{cond_a_new["land"]}:{",".join([str(x) for x in cond_a_new_adj])}",
+                                "id": f"{cond_a_new["land"]}:{",".join([str(x) for x in cond_a_new_adj])}",
                                 "adj_land": cond_a_new_adj,
                                 "possible_mine": cond_a["possible_mine"] - cond_b["possible_mine"],
+                                "type": f"({cond_a["type"]}) - ({cond_b["type"]})",
+                                "history": f"{cond_a["id"]} - {cond_b["id"]}",
                             })
                             if cond_a_new["id"] not in self.condition_id_list:
                                 self.condition_list.append(cond_a_new)
@@ -1917,14 +1930,62 @@ class Bot(QRunnable):
                         else:  # len(cond_b_new_adj) > 0:
                             cond_b_new = cond_b.copy()
                             cond_b_new.update({
-                                "id": f"sub_{cond_b_new["land"]}:{",".join([str(x) for x in cond_b_new_adj])}",
+                                "id": f"{cond_b_new["land"]}:{",".join([str(x) for x in cond_b_new_adj])}",
                                 "adj_land": cond_b_new_adj,
                                 "possible_mine": cond_b["possible_mine"] - cond_a["possible_mine"],
+                                "type": f"({cond_b["type"]}) - ({cond_a["type"]})",
+                                "history": f"{cond_b["id"]} - {cond_a["id"]}",
                             })
                             if cond_b_new["id"] not in self.condition_id_list:
                                 self.condition_list.append(cond_b_new)
                                 self.condition_id_list.append(cond_b_new["id"])
                                 condition_updated = True
+
+            # if not condition_updated and not global_condition_added:
+            #     cond_a = self.global_condition.copy()
+            #     for cond_b in self.condition_list:
+            #         if cond_b["id"].startswith("sub_"):
+            #             continue
+            #         if self.is_include(cond_a["adj_land"], cond_b["adj_land"], lambda x: x):
+            #             if cond_a["possible_mine"] == cond_b["possible_mine"]:
+            #                 if len(cond_a["adj_land"]) != len(cond_b["adj_land"]):
+            #                     empty_land = self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x)[0][0]
+            #                     return empty_land, False
+            #
+            #             else:  # cond_a["possible_mine"] != cond_b["possible_mine"]
+            #                 possible_mine_land, cond_a_new_adj, cond_b_new_adj = \
+            #                     self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x)
+            #                 if abs(cond_a["possible_mine"] - cond_b["possible_mine"]) \
+            #                         == abs(len(cond_a["adj_land"]) - len(cond_b["adj_land"])):
+            #                     return possible_mine_land[0], True
+            #                 elif len(cond_a_new_adj) > 0:
+            #                     cond_a_new = cond_a.copy()
+            #                     cond_a_new.update({
+            #                         "id": f"{cond_a_new["land"]}:{",".join([str(x) for x in cond_a_new_adj])}",
+            #                         "adj_land": cond_a_new_adj,
+            #                         "possible_mine": cond_a["possible_mine"] - cond_b["possible_mine"],
+            #                         "type": f"({cond_a["type"]}) - ({cond_b["type"]})",
+            #                         "history": f"{cond_a["id"]} - {cond_b["id"]}",
+            #                     })
+            #                     if cond_a_new["id"] not in self.condition_id_list:
+            #                         self.condition_list.append(cond_a_new)
+            #                         self.condition_id_list.append(cond_a_new["id"])
+            #                         condition_updated = True
+            #                 # else:  # len(cond_b_new_adj) > 0:
+            #                 #     cond_b_new = cond_b.copy()
+            #                 #     cond_b_new.update({
+            #                 #         "id": f"sub_{cond_b_new["land"]}:{",".join([str(x) for x in cond_b_new_adj])}",
+            #                 #         "adj_land": cond_b_new_adj,
+            #                 #         "possible_mine": cond_b["possible_mine"] - cond_a["possible_mine"],
+            #                 #     })
+            #                 #     if cond_b_new["id"] not in self.condition_id_list:
+            #                 #         self.condition_list.append(cond_b_new)
+            #                 #         self.condition_id_list.append(cond_b_new["id"])
+            #                 #         condition_updated = True
+            #     # self.condition_list.append(self.global_condition)
+            #     # self.condition_id_list.append(self.global_condition["id"])
+            #     # condition_updated = True
+            #     global_condition_added = True
             if not condition_updated:
                 break
         return None, None
@@ -1951,7 +2012,15 @@ class Bot(QRunnable):
                         "mine_rate_v3": avg_mine_rate,
                         "mine_rate_v3_history": [(avg_mine_rate, "None", )],
                     }
+        none_adj_land_list = dict()
+        for land in mine_field.land_list:
+            if not land.checked and land.cover == SYMBOL_BLANK and land.id not in all_adj_land_list:
+                none_adj_land_list[land.id] = {
+                    "id": land,
+                    "mine_rate": avg_mine_rate,
+                }
         for condition in self.condition_list:
+            # print(condition)
             cond_mine_rate = condition["possible_mine"] / len(condition["adj_land"])
             for land in condition["adj_land"]:
                 # # version_1
@@ -2024,19 +2093,20 @@ class Bot(QRunnable):
         for land in mine_field.land_list:
             if land.checked or land.cover != SYMBOL_BLANK or land.id in all_adj_land_list:
                 continue
+        for _id, land in none_adj_land_list.items():
             if max_mine_rate == avg_mine_rate:
                 if Game().ui.ui_activated:
-                    self.result.custom_cover_ui.emit(land, avg_cover, "#e08080")
-                high_mine_rate_list.append(land.id)
-                rate_dict[land.id] = avg_mine_rate
+                    self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#e08080")
+                high_mine_rate_list.append(_id)
+                rate_dict[_id] = avg_mine_rate
             elif min_mine_rate == avg_mine_rate:
                 if Game().ui.ui_activated:
-                    self.result.custom_cover_ui.emit(land, avg_cover, "#80e080")
-                high_safe_rate_list.append(land.id)
-                rate_dict[land.id] = avg_mine_rate
+                    self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#80e080")
+                high_safe_rate_list.append(_id)
+                rate_dict[_id] = avg_mine_rate
             else:
                 if Game().ui.ui_activated:
-                    self.result.custom_cover_ui.emit(land, avg_cover, "#909090")
+                    self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#909090")
 
         print(f"[bot] "
               f"cond_list: {len(self.condition_list)}, "
