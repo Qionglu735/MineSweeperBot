@@ -13,6 +13,7 @@ import gzip
 import itertools
 import json
 import math
+import multiprocessing
 import os
 import sys
 import time
@@ -125,7 +126,7 @@ class Land(object):
         field_width = self.mine_field.field_width
         field_height = self.mine_field.field_height
 
-        if Game().terminated or not Game().terminated and self.cover in [
+        if self.mine_field.game.terminated or not self.mine_field.game.terminated and self.cover in [
             SYMBOL_FLAG,
             SYMBOL_UNKNOWN,
         ]:
@@ -328,7 +329,6 @@ class MineField(object):
                     land.content = SYMBOL_BLANK
                 else:
                     land.content = f"{land.adjacent_mine_count}"
-                # land.ui.update_tooltip(Game().cheat_mode)
 
         self.game.start_time = datetime.datetime.now()
 
@@ -461,8 +461,9 @@ class MineField(object):
         self.game.ui.setFixedHeight(106 + self.field_height * self.game.ui.button_size)
 
 
-@singleton
 class Game(object):
+    id = -1
+
     terminated = False
     start_time = None
     end_time = None
@@ -478,30 +479,32 @@ class Game(object):
     bot_pool = None
     bot_stat = None
 
-    qt_app = None
+    global_stat = None
+
     ui = None
 
-    def __init__(self):
+    def __init__(self, _id, global_stat):
+        self.id = _id
+        self.global_stat = global_stat
+        
         self.mine_field = MineField(self)
 
-        self.bot = Bot()
+        self.bot = Bot(self)
         self.bot.result.click.connect(self.bot_click)
         self.bot.result.random_click.connect(self.bot_random_click)
         self.bot.result.mark.connect(self.bot_mark)
-        # self.bot.result.highlight.connect(self.bot_highlight)
         self.bot.result.custom_cover_ui.connect(self.bot_custom_cover_ui)
         self.bot.result.bot_finished.connect(self.bot_finished)
 
         self.bot_looper = BotLooper()
         self.bot_looper.status.init_map.connect(self.new_game_setup)
         self.bot_looper.status.start_bot.connect(self.start_bot)
+        self.bot_looper.status.looping_exited.connect(self.looper_exited)
 
         self.bot_pool = QThreadPool()
         self.bot_pool.setMaxThreadCount(20)
 
-        self.bot_stat = BotStat()
-
-        self.qt_app = QApplication(sys.argv)
+        self.bot_stat = BotStat(self)
 
     def new_game_setup(self, field_width=0, field_height=0, mine_count=0):
         if field_width > 0:
@@ -592,18 +595,19 @@ class Game(object):
     def bot_finished(self):  # <-- bot
         self.bot_looper.status.bot_finished.emit()  # --> bot_looper
         self.bot_stat.record_game_result(self.result)
-        if self.ui is not None:
-            self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
-        else:
-            self.bot_stat.to_console()
+        file_path = None
         if self.terminated and self.result == "LOSE":
             now = datetime.datetime.now()
             if not os.path.isdir("screenshot"):
                 os.mkdir("screenshot")
             file_path = f"screenshot/{now.strftime("%Y_%m_%d_%H_%M_%S_%f")}.png"
             self.save(file_path, self.bot.data_before_solve)
+        if self.ui is not None:
+            self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+        else:
+            self.bot_stat.to_global_stat(file_path)
 
-    def start_looper(self):
+    def start_looper(self, loop_times=-1):
         self.bot.auto_click = True
         self.bot.auto_mark = True
         self.bot.random_step = -1
@@ -612,26 +616,31 @@ class Game(object):
             self.ui.menu_action_dict["Auto Mark"].setChecked(True)
             self.ui.menu_action_dict["Auto Guess"].setChecked(True)
         try:
+            self.bot_looper.looping = loop_times
             self.bot_pool.start(self.bot_looper)
         except RuntimeError:
+            import traceback
+            traceback.print_exc()
             self.bot_looper = BotLooper()
             self.bot_looper.status.init_map.connect(self.new_game_setup)
             self.bot_looper.status.start_bot.connect(self.start_bot)
+            self.bot_looper.looping = loop_times
             self.bot_pool.start(self.bot_looper)
 
     def stop_looper(self):
-        if self.bot_looper is not None and self.bot_looper.looping:
+        if self.bot_looper is not None and self.bot_looper.looping != 0:
             self.bot_looper.status.stop_looping.emit()  # --> bot_looper
             self.bot.result.stop_solving.emit()  # --> bot
             self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
-            while self.bot_looper.looping:
+            while self.bot_looper.looping != 0:
                 pass
             self.ui.menu_action_dict["Solve Continuously"].setChecked(False)
 
-    def ui_init(self):
-        self.qt_app.setStyle("Fusion")
-        self.qt_app.setPalette(dark_theme.PALETTE)
+    def looper_exited(self):
+        if self.ui is None:
+            QTimer.singleShot(0, QApplication.quit)
 
+    def ui_init(self):
         self.ui = GameUI(self)
         self.ui.show()
 
@@ -647,9 +656,6 @@ class Game(object):
         self.ui.adjustSize()
         self.ui.set_emote("")
         self.ui.set_message("New Game Ready")
-
-    def wait_for_exit(self):
-        sys.exit(self.qt_app.exec())
 
 
 class LandUI(QPushButton):
@@ -1543,7 +1549,7 @@ class GameUI(QMainWindow):
             self.game.start_bot()
 
     def menu_bot_solve_looping(self):
-        if not self.game.bot_looper.looping:
+        if self.game.bot_looper.looping == 0:
             if self.game.terminated:
                 self.game.new_game_setup()
             self.game.start_looper()
@@ -1706,6 +1712,10 @@ class GameUI(QMainWindow):
         self.game.stop_looper()
         if self.game.bot and self.game.bot.auto_solving:
             self.game.bot.result.stop_solving.emit()
+        self.game.global_stat.put({
+            "game_id": self.game.id,
+            "exit": True,
+        })
         event.accept()
 
     def event(self, event):
@@ -1728,27 +1738,107 @@ class GameUI(QMainWindow):
         self.game.bot.result.game_update_completed.emit()  # --> bot
 
 
-UI = True
-
-PRESET_SELECT = 0
+UI = False
+PROCESS_COUNT = 5
+LOOP_COUNT = 1000 * 1000 * 30
 
 
 def main():
-    game = Game()
+    if UI:
+        game_count = 1
+    else:
+        game_count = len(PRESET) * PROCESS_COUNT
+
+    global_stat = dict()
+    for i in range(len(PRESET)):
+        global_stat[i % len(PRESET)] = list()
+
+    global_stat_queue = multiprocessing.Queue()
+    game_list = list()
+    for i in range(game_count):
+        game = multiprocessing.Process(target=create_new_game, args=(i, global_stat_queue, ))
+        game_list.append(game)
+        game.start()
+
+    game_exit_list = [False for _ in game_list]
+    while not all(game_exit_list):
+        r = global_stat_queue.get()
+        if "exit" in r:
+            game_exit_list[r["game_id"]] = True
+            continue
+
+        process_global_stat(global_stat, r)
+
+    for game in game_list:
+        game.join()
+
+
+def create_new_game(index, global_stat):
+    qt_app = QApplication(sys.argv)
+    if UI:
+        qt_app.setStyle("Fusion")
+        qt_app.setPalette(dark_theme.PALETTE)
+
+    game = Game(index, global_stat)
     game.new_game_setup(
-        field_width=PRESET[PRESET_SELECT][0],
-        field_height=PRESET[PRESET_SELECT][1],
-        mine_count=PRESET[PRESET_SELECT][2],
+        field_width=PRESET[index % len(PRESET)][0],
+        field_height=PRESET[index % len(PRESET)][1],
+        mine_count=PRESET[index % len(PRESET)][2],
     )
     if UI:
         game.ui_init()
         game.ui_setup()
     else:
-        game.start_looper()
-    game.wait_for_exit()
+        game.start_looper(LOOP_COUNT)
+
+    qt_app.exec()
+
+    global_stat.put({
+        "game_id": index,
+        "exit": True,
+    })
+
+
+def process_global_stat(global_stat, r):
+    preset_id = r["game_id"] % len(PRESET)
+    global_stat[preset_id].append(r)
+
+    no = len(global_stat[preset_id])
+    win = len([r for r in global_stat[preset_id] if r["win"] is True])
+    lose = len([r for r in global_stat[preset_id] if r["win"] is False])
+    win_rate = 0
+    if win + lose > 0:
+        win_rate = win / (win + lose)
+    click = sum([r["click"] for r in global_stat[preset_id]])
+    mark = sum([r["mark"] for r in global_stat[preset_id]])
+    guess = sum([r["random_click"] for r in global_stat[preset_id]])
+    guess_suc_rate = 0
+    if guess > 0:
+        guess_suc_rate = (guess - lose) / guess
+    total_time = sum([r["usage_time"] for r in global_stat[preset_id] if r["win"] is True])
+    avg_time = 0
+    if win > 0:
+        avg_time = total_time / win
+    print(
+        f"[stat {preset_id}]",
+        f"Game: {r["game_id"]:2d}, "
+        f"No.{no}: {"WIN " if r["win"] else "LOSE"}, "
+        f"Minefield: {PRESET[preset_id][0]}x{PRESET[preset_id][1]}/{PRESET[preset_id][2]}, "
+        f"Click/Mark: {r["click"]}/{r["mark"]}, "
+        f"Guess: {r["random_click"]}, "
+        f"Usage time: {r["usage_time"]:.6f}, "
+        f"Total Win/Lose: {win}/{lose}, "
+        f"Win Rate: {win_rate * 100:.2f}%, "
+        f"Total Click/Mark/Guess: {click}/{mark}/{guess}, "
+        f"Guess Success Rate: {guess_suc_rate * 100:.2f}%, "
+        f"Avg. Usage Time: {avg_time:.6f}, "
+        f"Save File: {r["save_file"]}"
+    )
 
 
 class Bot(QRunnable):
+    game = None
+
     class Result(QObject):
         click = Signal(object)  # --> Master
         random_click = Signal(object)  # --> Master
@@ -1779,15 +1869,17 @@ class Bot(QRunnable):
 
     debug_print = False
 
-    def __init__(self):
+    def __init__(self, game):
         super().__init__()
+        self.game = game
+
         self.setAutoDelete(False)
         self.result = Bot.Result()
         self.result.game_update_completed.connect(self.game_update_completed)
         self.result.stop_solving.connect(self.stop_solving)
 
     def game_update_completed(self):
-        if Game().terminated:
+        if self.game.terminated:
             self.auto_solving = False
         self.game_updating = False
 
@@ -1799,7 +1891,7 @@ class Bot(QRunnable):
         self.auto_solving = True
         self.game_updating = False
         while self.auto_solving and self.auto_step != 0:
-            self.data_before_solve = Game().mine_field.save()
+            self.data_before_solve = self.game.mine_field.save()
             self.game_updating = True
             solve_success = self.solve()
             if not solve_success:
@@ -1815,7 +1907,7 @@ class Bot(QRunnable):
     def solve(self):
         self.collect_condition()
         # print("[Bot] Try to analyse ...")
-        if all([land.checked is False for land in Game().mine_field.land_list]):
+        if all([land.checked is False for land in self.game.mine_field.land_list]):
             if self.auto_click:
                 self.result.emote.emit(":D")
                 return self.random_click(is_first_click=True)
@@ -1826,7 +1918,7 @@ class Bot(QRunnable):
                 return False
         land_id, have_mine = self.analyse_condition()
         if land_id is not None:
-            land = Game().mine_field.land(land_id)
+            land = self.game.mine_field.land(land_id)
             if not have_mine:
                 if self.auto_click:
                     self.result.click.emit(land)
@@ -1863,7 +1955,7 @@ class Bot(QRunnable):
                 return False
 
     def collect_condition(self):
-        mine_field = Game().mine_field
+        mine_field = self.game.mine_field
         self.condition_list = list()
         self.condition_id_list = list()
         land_list = mine_field.land_list[:]
@@ -1912,7 +2004,7 @@ class Bot(QRunnable):
         #     f"{self.global_condition["land"]}:{",".join([str(x) for x in self.global_condition["adj_land"]])}"
 
     def random_click(self, is_first_click=False):
-        mine_field = Game().mine_field
+        mine_field = self.game.mine_field
         if len(self.random_choice_list) != 0:
             land_list = [land for land in mine_field.land_list if land.id in self.random_choice_list]
         else:
@@ -2035,7 +2127,7 @@ class Bot(QRunnable):
         return None, None
 
     def analyse_possibility(self) -> (list, list, dict, ):
-        mine_field = Game().mine_field
+        mine_field = self.game.mine_field
         cover_land_count = mine_field.field_width * mine_field.field_height \
             - mine_field.revealed_land_count() - mine_field.marked_land_count()
         cover_mine_count = mine_field.mine_count - mine_field.marked_land_count()
@@ -2111,7 +2203,7 @@ class Bot(QRunnable):
 
         for _, land in all_adj_land_list.items():
             # if not (land["mine_rate_v1"] == land["mine_rate_v2"] == land["mine_rate_v3"]):
-            #     print("::::", land["id"], Game().mine_field.land(land["id"]).content == SYMBOL_MINE)
+            #     print("::::", land["id"], self.game.mine_field.land(land["id"]).content == SYMBOL_MINE)
             #     print("v1", land["mine_rate_v1"], land["mine_rate_v1_history"])
             #     print("v2", land["mine_rate_v2"], land["mine_rate_v2_history"])
             #     print("v3", land["mine_rate_v3"], land["mine_rate_v3_history"])
@@ -2124,17 +2216,17 @@ class Bot(QRunnable):
                 .replace("0.", ".") \
                 .replace("1.00", "1.0")
             if land["mine_rate"] == max_mine_rate:
-                if Game().ui is not None and Game().ui.ui_activated:
+                if self.game.ui is not None and self.game.ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#e08080")
                 high_mine_rate_list.append(_id)
                 rate_dict[_id] = land["mine_rate"]
             elif land["mine_rate"] == min_mine_rate:
-                if Game().ui is not None and Game().ui.ui_activated:
+                if self.game.ui is not None and self.game.ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#80e080")
                 high_safe_rate_list.append(_id)
                 rate_dict[_id] = land["mine_rate"]
             else:
-                if Game().ui is not None and Game().ui.ui_activated:
+                if self.game.ui is not None and self.game.ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#909090")
         avg_cover = "{:.2f}" \
             .format(avg_mine_rate) \
@@ -2145,28 +2237,28 @@ class Bot(QRunnable):
                 continue
         for _id, land in none_adj_land_list.items():
             if max_mine_rate == avg_mine_rate:
-                if Game().ui is not None and Game().ui.ui_activated:
+                if self.game.ui is not None and self.game.ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#e08080")
                 high_mine_rate_list.append(_id)
                 rate_dict[_id] = avg_mine_rate
             elif min_mine_rate == avg_mine_rate:
-                if Game().ui is not None and Game().ui.ui_activated:
+                if self.game.ui is not None and self.game.ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#80e080")
                 high_safe_rate_list.append(_id)
                 rate_dict[_id] = avg_mine_rate
             else:
-                if Game().ui is not None and Game().ui.ui_activated:
+                if self.game.ui is not None and self.game.ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#909090")
 
-        print(f"[bot] "
-              f"cond_list: {len(self.condition_list)}, "
-              f"possible_mine_list: {len(high_mine_rate_list)} ({max_mine_rate:.2f}), "
-              f"possible_safe_list: {len(high_safe_rate_list)} ({min_mine_rate:.2f}), "
-              f"avg: {avg_mine_rate:.2f}")
+        # print(f"[bot {self.game.id}] "
+        #       f"cond_list: {len(self.condition_list)}, "
+        #       f"possible_mine_list: {len(high_mine_rate_list)} ({max_mine_rate:.2f}), "
+        #       f"possible_safe_list: {len(high_safe_rate_list)} ({min_mine_rate:.2f}), "
+        #       f"avg: {avg_mine_rate:.2f}")
         return high_mine_rate_list, high_safe_rate_list, rate_dict
 
     def analyse_mark_count(self, possible_mine_list, possible_safe_list, possibility_dict):
-        mine_field = Game().mine_field
+        mine_field = self.game.mine_field
         if len(possible_safe_list) > 0:
             choice_list = possible_safe_list
         else:
@@ -2189,7 +2281,7 @@ class Bot(QRunnable):
                     + mine_field.range_mark_count(land_id, 2)
                 min_mark_count = min(min_mark_count, mark_count[land_id])
 
-            print("[bot]", "choice_list:", "[" + ", ".join([f"{x}: {mark_count[x]}" for x in choice_list]) + "]")
+            # print(f"[bot {self.game.id}]", "choice_list:", "[" + ", ".join([f"{x}: {mark_count[x]}" for x in choice_list]) + "]")
 
             choice_list = [x for x in choice_list[:] if mark_count[x] == min_mark_count]
 
@@ -2243,8 +2335,9 @@ class BotLooper(QRunnable):
         start_bot = Signal()         # --> Master
         bot_finished = Signal()      # Master -->
         stop_looping = Signal()     # Master -->
+        looping_exited = Signal()  # --> Master
 
-    looping = False
+    looping = 0
     map_initializing = False
     bot_running = False
 
@@ -2262,46 +2355,57 @@ class BotLooper(QRunnable):
         self.bot_running = False
 
     def stop_looping(self):
-        self.looping = False
+        self.looping = 0
 
     @Slot()
     def run(self):
-        self.looping = True
-        while self.looping:
-            # print("[Looper] Start Bot")
+        while self.looping != 0:
+            # print("[Looper] Start Bot", self.looping)
             self.bot_running = True
             self.status.start_bot.emit()
             while self.bot_running:
-                if not self.looping:
+                if self.looping == 0:
                     break
-            if not self.looping:
+            if self.looping == 0:
                 break
 
             for _ in range(1 * 10):
                 time.sleep(0.1)
-                if not self.looping:
+                if self.looping == 0:
                     break
-            if not self.looping:
+
+            if self.looping > 0:
+                self.looping -= 1
+
+            if self.looping == 0:
                 break
 
-            # print("[Looper] Init Map")
+            # print("[Looper] Init Map", self.looping)
             self.map_initializing = True
             self.status.init_map.emit()
             while self.map_initializing:
-                if not self.looping:
+                if self.looping == 0:
                     break
-            if not self.looping:
+            if self.looping == 0:
                 break
 
             for _ in range(1 * 10):
                 time.sleep(0.1)
-                if not self.looping:
+                if self.looping == 0:
                     break
+
+        self.status.looping_exited.emit()
 
 
 class BotStat:
-    record_list = list()
+    game = None
+
+    record_list = None
     current = -1
+
+    def __init__(self, game):
+        self.game = game
+        self.record_list = list()
 
     def create_record(self):
         record = {
@@ -2343,38 +2447,15 @@ class BotStat:
                 self.record_list[self.current]["win"] = game_result == "WIN"
             # print(self.record_list[self.current])
 
-    def to_console(self):
+    def to_global_stat(self, save_file_path=None):
         if len(self.record_list) > 0:
-            r = self.record_list[-1]
-            win = len([r for r in self.record_list if r["win"] is True])
-            lose = len([r for r in self.record_list if r["win"] is False])
-            win_rate = 0
-            if win + lose > 0:
-                win_rate = win / (win + lose)
-            click = sum([r["click"] for r in self.record_list])
-            mark = sum([r["mark"] for r in self.record_list])
-            guess = sum([r["random_click"] for r in self.record_list])
-            guess_suc_rate = 0
-            if guess > 0:
-                guess_suc_rate = (guess - lose) / guess
-            total_time = sum([r["usage_time"] for r in self.record_list if r["win"] is True])
-            avg_time = 0
-            if win > 0:
-                avg_time = total_time / win
+            r = self.record_list[-1].copy()
 
-            # print("[stat]", r)
-            print(
-                "[stat]",
-                f"No.{r["no"]}: {"WIN" if r["win"] else "LOSE"}, "
-                f"Click/Mark: {r["click"]}/{r["mark"]}, "
-                f"Guess: {r["random_click"]}, "
-                f"Usage time: {r["usage_time"]:.6f}, "
-                f"Total Win/Lose: {win}/{lose}, "
-                f"Total Win Rate: {win_rate * 100:.2f}%, "
-                f"Total Click/Mark/Guess: {click}/{mark}/{guess}, "
-                f"Guess Success Rate: {guess_suc_rate * 100:.2f}%, "
-                f"Avg. Usage Time: {avg_time:.6f}"
-            )
+            r.update({
+                "game_id": self.game.id,
+                "save_file": save_file_path,
+            })
+            self.game.global_stat.put(r)
 
 
 if __name__ == '__main__':
