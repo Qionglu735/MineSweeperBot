@@ -56,6 +56,8 @@ DIFFICULTY_PRESET = [
     (0.24, "Brutal", ),
 ]
 
+SAFETY_LEVEL_DEFAULT = 1
+
 MIN_WIDTH = 3
 MAX_WIDTH = 1000
 
@@ -84,7 +86,6 @@ COLOR_DICT = {
     "8": "#404040",
 }
 
-SAFETY_LEVEL_DEFAULT = 1
 BUTTON_SIZE_DEFAULT = 20
 
 
@@ -174,7 +175,8 @@ class Land(object):
                         _land.left_click(chain=True)
 
             self.focus = True
-            self.ui.update_display()
+            if self.ui is not None:
+                self.ui.update_display()
 
             # check if chain click on mine
             self.mine_field.check_end_game(self.x, self.y)
@@ -183,12 +185,14 @@ class Land(object):
                 if _land == self:
                     continue
                 _land.focus = False
-                _land.ui.update_display()
+                if _land.ui is not None:
+                    _land.ui.update_display()
 
-            self.mine_field.game.ui.update_title()
-            if not self.mine_field.game.game_terminated:
-                self.mine_field.game.ui.set_message(
-                    f"{self.mine_field.mine_count - self.mine_field.marked_land_count()} mines left")
+            if self.mine_field.game.ui is not None:
+                self.mine_field.game.ui.update_title()
+                if not self.mine_field.game.game_terminated:
+                    self.mine_field.game.ui.set_message(
+                        f"{self.mine_field.mine_count - self.mine_field.marked_land_count()} mines left")
 
     def auto_click(self):
         # print(f"Auto Click")
@@ -206,17 +210,20 @@ class Land(object):
                     self.cover = SYMBOL_BLANK
                 else:
                     self.cover = SYMBOL_FLAG
-            self.mine_field.game.ui.set_message(
-                f"{self.mine_field.mine_count - self.mine_field.marked_land_count()} mines left")
-            self.mine_field.game.ui.update_title()
             self.focus = True
-            self.ui.update_display()
+            if self.ui is not None:
+                self.ui.update_display()
+            if self.mine_field.game.ui is not None:
+                self.mine_field.game.ui.update_title()
+                self.mine_field.game.ui.set_message(
+                    f"{self.mine_field.mine_count - self.mine_field.marked_land_count()} mines left")
 
             for _land in self.mine_field.land_list:
                 if _land == self:
                     continue
                 _land.focus = False
-                _land.ui.update_display()
+                if _land.ui is not None:
+                    _land.ui.update_display()
 
     def auto_mark(self):
         # print(f"Auto Mark")
@@ -372,26 +379,44 @@ class MineField(object):
                 count += 1
         return count
 
+    def range_mark_count(self, _id, distance=1):
+        land = self.land(_id)
+        count = 0
+        total = 0
+        range_array = range(-distance, distance + 1)
+        for _x, _y in itertools.product(range_array, range_array):
+            if _x == 0 and _y == 0:
+                continue
+            if 0 <= (land.x + _x) < self.field_width and 0 <= (land.y + _y) < self.field_height:
+                total += 1
+                if self.land_list[land.x + _x + self.field_width * (land.y + _y)].cover == SYMBOL_FLAG:
+                    count += 1
+        return int(count / total * 8)
+
     def check_end_game(self, x, y):
         if self.land_list[x + self.field_width * y].have_mine:
             self.game.game_end_time = datetime.datetime.now()
             self.game.game_terminated = True
             self.game.game_result = "LOSE"
-            self.game.ui.set_message("YOU LOSE")
+            if self.game.ui is not None:
+                self.game.ui.set_message("YOU LOSE")
             for land in self.land_list:
                 if land.have_mine:
                     if land.cover != SYMBOL_FLAG:
                         land.cover = SYMBOL_MINE
-                        land.ui.update_display()
+                        if land.ui is not None:
+                            land.ui.update_display()
                 else:
                     if land.cover == SYMBOL_FLAG:
                         land.wrong_flag = True
-                        land.ui.update_display()
+                        if land.ui is not None:
+                            land.ui.update_display()
         elif self.revealed_land_count() == self.field_width * self.field_height - self.mine_count:
             self.game.game_end_time = datetime.datetime.now()
             self.game.game_terminated = True
             self.game.game_result = "WIN"
-            self.game.ui.set_message("YOU WIN")
+            if self.game.ui is not None:
+                self.game.ui.set_message("YOU WIN")
             for y in range(self.field_height):
                 for x in range(self.field_width):
                     if self.land_list[x + self.field_width * y].have_mine:
@@ -453,7 +478,7 @@ class Game(object):
     bot_pool = None
     bot_stat = None
 
-    ui_app = None
+    qt_app = None
     ui = None
 
     def __init__(self):
@@ -463,6 +488,7 @@ class Game(object):
         self.bot.result.click.connect(self.bot_click)
         self.bot.result.random_click.connect(self.bot_random_click)
         self.bot.result.mark.connect(self.bot_mark)
+        # self.bot.result.highlight.connect(self.bot_highlight)
         self.bot.result.custom_cover_ui.connect(self.bot_custom_cover_ui)
         self.bot.result.bot_finished.connect(self.bot_finished)
 
@@ -474,6 +500,8 @@ class Game(object):
         self.bot_pool.setMaxThreadCount(20)
 
         self.bot_stat = BotStat()
+
+        self.qt_app = QApplication(sys.argv)
 
     def new_game_setup(self, field_width=0, field_height=0, mine_count=0):
         if field_width > 0:
@@ -488,11 +516,7 @@ class Game(object):
         self.reset_status()
 
         if self.ui is not None:
-            self.mine_field.ui_setup()
-            self.ui.setCentralWidget(self.mine_field.ui)
-            self.ui.adjustSize()
-            self.ui.set_emote("")
-            self.ui.set_message("New Game Ready")
+            self.ui_setup()
 
         if self.bot_looper is not None and self.bot_looper.looping:
             self.bot_looper.status.map_ready.emit()  # --> bot_looper
@@ -504,8 +528,12 @@ class Game(object):
         self.game_result = None
 
     def save(self, file_path, data=None):
-        pixmap = self.ui.take_screenshot()
-        pixmap.save(file_path, "png")
+        if self.ui is not None:
+            pixmap = self.ui.take_screenshot()
+            pixmap.save(file_path, "png")
+        else:
+            with open(file_path, "wb") as f:
+                f.write(b"IEND\xAE\x42\x60\x82")
         if data is None:
             data = self.mine_field.save()
         with open(file_path, "ab") as f:
@@ -538,21 +566,24 @@ class Game(object):
         self.bot.result.game_update_completed.emit()  # --> bot
         if self.bot.auto_solving:
             self.bot_stat.record_click()
-            self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+            if self.ui is not None:
+                self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
 
     def bot_random_click(self, land):  # <-- bot
         land.auto_click()
         self.bot.result.game_update_completed.emit()  # --> bot
         if self.bot.auto_solving:
             self.bot_stat.record_random_click()
-            self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+            if self.ui is not None:
+                self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
 
     def bot_mark(self, land):  # <-- bot
         land.auto_mark()
         self.bot.result.game_update_completed.emit()  # --> bot
         if self.bot.auto_solving:
             self.bot_stat.record_mark()
-            self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+            if self.ui is not None:
+                self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
 
     @staticmethod
     def bot_custom_cover_ui(land, custom_cover, custom_color):
@@ -561,7 +592,10 @@ class Game(object):
     def bot_finished(self):  # <-- bot
         self.bot_looper.status.bot_finished.emit()  # --> bot_looper
         self.bot_stat.record_game_result(self.game_result)
-        self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+        if self.ui is not None:
+            self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+        else:
+            self.bot_stat.to_console()
         if self.game_terminated and self.game_result == "LOSE":
             now = datetime.datetime.now()
             if not os.path.isdir("screenshot"):
@@ -571,12 +605,12 @@ class Game(object):
 
     def start_looper(self):
         self.bot.auto_click = True
-        self.ui.menu_action_dict["Auto Click"].setChecked(True)
         self.bot.auto_mark = True
-        self.ui.menu_action_dict["Auto Mark"].setChecked(True)
-        # self.bot.auto_random_click = True
         self.bot.random_step = -1
-        self.ui.menu_action_dict["Auto Guess"].setChecked(True)
+        if self.ui is not None:
+            self.ui.menu_action_dict["Auto Click"].setChecked(True)
+            self.ui.menu_action_dict["Auto Mark"].setChecked(True)
+            self.ui.menu_action_dict["Auto Guess"].setChecked(True)
         try:
             self.bot_pool.start(self.bot_looper)
         except RuntimeError:
@@ -595,9 +629,8 @@ class Game(object):
             self.ui.menu_action_dict["Solve Continuously"].setChecked(False)
 
     def ui_init(self):
-        self.ui_app = QApplication(sys.argv)
-        self.ui_app.setStyle("Fusion")
-        self.ui_app.setPalette(dark_theme.PALETTE)
+        self.qt_app.setStyle("Fusion")
+        self.qt_app.setPalette(dark_theme.PALETTE)
 
         self.ui = GameUI(self)
         self.ui.show()
@@ -609,15 +642,14 @@ class Game(object):
         self.bot.result.highlight.connect(self.ui.bot_highlight)
 
     def ui_setup(self):
-        pass
+        self.mine_field.ui_setup()
+        self.ui.setCentralWidget(self.mine_field.ui)
+        self.ui.adjustSize()
+        self.ui.set_emote("")
+        self.ui.set_message("New Game Ready")
 
     def wait_for_exit(self):
-        if self.ui_app is not None:
-            sys.exit(self.ui_app.exec())
-        else:
-            while not self.game_terminated:
-                pass
-            sys.exit()
+        sys.exit(self.qt_app.exec())
 
 
 class LandUI(QPushButton):
@@ -1025,7 +1057,6 @@ class StatisticDialog(QDialog):
         self.setLayout(grid)
 
     def refresh(self, record_list):
-
         win = len([r for r in record_list if r["win"] is True])
         lose = len([r for r in record_list if r["win"] is False])
         total = win + lose
@@ -1044,6 +1075,12 @@ class StatisticDialog(QDialog):
 
             self.lose_count.setText(f"{lose}")
             self.lose_rate.setText(f"{lose / total * 100:.2f}%")
+        else:
+            self.win_count.setText("0")
+            self.win_rate.setText("0.00%")
+
+            self.lose_count.setText("0")
+            self.lose_rate.setText("0.00%")
 
         if total_op > 0:
             self.click_count.setText(f"{click}")
@@ -1054,15 +1091,29 @@ class StatisticDialog(QDialog):
 
             self.guess_count.setText(f"{guess}")
             self.guess_rate.setText(f"{guess / total_op * 100:.2f}%")
+        else:
+            self.click_count.setText("0")
+            self.click_rate.setText("0.00%")
+
+            self.mark_count.setText("0")
+            self.mark_rate.setText("0.00%")
+
+            self.guess_count.setText("0")
+            self.guess_rate.setText("0.00%")
 
         self.guess_success_count.setText(f"{guess - lose}")
         self.guess_fail_count.setText(f"{lose}")
         if guess > 0:
             self.guess_success_rate.setText(f"{(guess - lose) / guess * 100:.2f}%")
             self.guess_fail_rate.setText(f"{lose / guess * 100:.2f}%")
+        else:
+            self.guess_success_rate.setText("0.00%")
+            self.guess_fail_rate.setText("0.00%")
 
         if win > 0:
             self.usage_time_avg.setText(f"{total_time / win:.6f}")
+        else:
+            self.usage_time_avg.setText("0.000000")
 
         if len(record_list) > 0:
             time_delta = datetime.datetime.now() - record_list[-1]["start_time"]
@@ -1088,6 +1139,17 @@ class StatisticDialog(QDialog):
                 self.cur_result.setText("Lose")
             else:
                 self.cur_result.setText("Solving")
+        else:
+            self.cur_click_count.setText("0")
+            self.cur_click_rate.setText("0.00%")
+
+            self.cur_mark_count.setText("0")
+            self.cur_mark_rate.setText("0.00%")
+
+            self.cur_guess_count.setText("0")
+            self.cur_guess_rate.setText("0.00%")
+
+            self.cur_usage_time.setText("0.000000")
 
         # self.update()
 
@@ -1386,7 +1448,7 @@ class GameUI(QMainWindow):
         # g = self.geometry()
         # fg = self.frameGeometry()
         # rfg = fg.translated(-g.left(), -g.top())
-        # screen = self.game.ui_app.primaryScreen()
+        # screen = self.game.qt_app.primaryScreen()
         # pixmap = QScreen.grabWindow(
         #     screen, win_id,
         #     rfg.left(), rfg.top(),
@@ -1450,7 +1512,6 @@ class GameUI(QMainWindow):
 
     def menu_bot_switch_auto_random_click(self):
         self.game.stop_looper()
-        # self.bot.auto_random_click = not self.bot.auto_random_click
         if self.game.bot.random_step >= 0:
             self.game.bot.random_step = -1  # unlimited
         else:
@@ -1667,14 +1728,23 @@ class GameUI(QMainWindow):
         self.game.bot.result.game_update_completed.emit()  # --> bot
 
 
+UI = True
+
+PRESET_SELECT = 0
+
+
 def main():
     game = Game()
-    game.ui_init()
     game.new_game_setup(
-        field_width=PRESET[0][0],
-        field_height=PRESET[0][1],
-        mine_count=PRESET[0][2],
+        field_width=PRESET[PRESET_SELECT][0],
+        field_height=PRESET[PRESET_SELECT][1],
+        mine_count=PRESET[PRESET_SELECT][2],
     )
+    if UI:
+        game.ui_init()
+        game.ui_setup()
+    else:
+        game.start_looper()
     game.wait_for_exit()
 
 
@@ -1694,7 +1764,6 @@ class Bot(QRunnable):
 
     auto_click = False
     auto_mark = False
-    # auto_random_click = False
     auto_step = -1
     random_step = 0
     game_updating = False
@@ -1703,6 +1772,7 @@ class Bot(QRunnable):
     condition_list = list()
     # global_condition = None
     condition_id_list = list()
+    random_choice_list = list()
     result = None
 
     data_before_solve = None
@@ -1772,6 +1842,7 @@ class Bot(QRunnable):
                     self.result.message.emit(f"({land.x + 1}, {land.y + 1}) have mine")
                     self.result.highlight.emit(land, "danger")
             self.result.emote.emit(":D")
+            self.random_choice_list = list()
             if self.debug_print:
                 for cond in self.condition_list:
                     print(cond)
@@ -1779,40 +1850,13 @@ class Bot(QRunnable):
         else:
             self.result.emote.emit(":(")
             possible_mine_list, possible_safe_list, possibility_dict = self.analyse_possibility()
+            self.analyse_mark_count(possible_mine_list, possible_safe_list, possibility_dict)
 
-            mine_field = Game().mine_field
-            # if self.auto_random_click:
             if self.random_step == -1 or self.random_step > 0:
                 if self.random_step > 0:
                     self.random_step -= 1
 
-                if len(possible_safe_list) > 0:
-                    choice_list = possible_safe_list
-                else:
-                    choice_list = [land.id for land in mine_field.land_list if not land.checked and land.cover not in [
-                        SYMBOL_FLAG,
-                        SYMBOL_UNKNOWN,
-                    ]]
-                    if len(choice_list) > len(possible_mine_list):
-                        choice_list = [land_id for land_id in choice_list[:] if land_id not in possible_mine_list]
-
-                # print("choice_list", len(choice_list))
-
-                if choice_list[0] in possibility_dict and possibility_dict[choice_list[0]] > 0.3:  # >= 1/3
-                    mark_count = dict()
-                    min_mark_count = mine_field.mine_count
-                    for land_id in choice_list:
-                        mark_count[land_id] = mine_field.row_mark_count(land_id) + mine_field.col_mark_count(land_id)
-                        min_mark_count = min(min_mark_count, mark_count[land_id])
-                    # choice_list = sorted(choice_list, key=lambda x: mark_count[x])
-                    # for land_id in choice_list:
-                    #     print(land_id, mark_count[land_id])
-                    choice_list = [x for x in choice_list[:] if mark_count[x] == min_mark_count]
-                    # print("choice_list filter by mine count", len(choice_list), choice_list)
-
-                return self.random_click(
-                   choice_list=choice_list,
-                )
+                return self.random_click()
             else:
                 print("[Bot] No conclusion found.")
                 self.result.message.emit(f"No conclusion found")
@@ -1867,10 +1911,10 @@ class Bot(QRunnable):
         # self.global_condition["id"] = \
         #     f"{self.global_condition["land"]}:{",".join([str(x) for x in self.global_condition["adj_land"]])}"
 
-    def random_click(self, is_first_click=False, choice_list=None):
+    def random_click(self, is_first_click=False):
         mine_field = Game().mine_field
-        if choice_list is not None:
-            land_list = [land for land in mine_field.land_list if land.id in choice_list]
+        if len(self.random_choice_list) != 0:
+            land_list = [land for land in mine_field.land_list if land.id in self.random_choice_list]
         else:
             land_list = [land for land in mine_field.land_list if not land.checked and land.cover not in [
                 SYMBOL_FLAG,
@@ -2035,26 +2079,32 @@ class Bot(QRunnable):
                 #             > abs(all_adj_land_list[land]["mine_rate_v1"] - avg_mine_rate):
                 #         all_adj_land_list[land]["mine_rate_v1"] = cond_mine_rate
                 #         all_adj_land_list[land]["mine_rate_v1_history"].append((cond_mine_rate, condition["id"], ))
-                #
+
                 # # version_2
                 # if abs(cond_mine_rate - avg_mine_rate) > abs(all_adj_land_list[land]["mine_rate_v2"] - avg_mine_rate):
                 #     all_adj_land_list[land]["mine_rate_v2"] = cond_mine_rate
                 #     all_adj_land_list[land]["mine_rate_v2_history"].append((cond_mine_rate, condition["id"], ))
 
                 # version_3
-                cond_confident = abs(cond_mine_rate - avg_mine_rate)
-                if cond_mine_rate < avg_mine_rate:
-                    cond_confident /= avg_mine_rate
+                confirm_rate = 0.7
+                if avg_mine_rate >= confirm_rate or cond_mine_rate >= confirm_rate:
+                    if cond_mine_rate > all_adj_land_list[land]["mine_rate_v3"]:
+                        all_adj_land_list[land]["mine_rate_v3"] = cond_mine_rate
+                        all_adj_land_list[land]["mine_rate_v3_history"].append((cond_mine_rate, condition["id"],))
                 else:
-                    cond_confident /= 0.8 - avg_mine_rate
-                record_confident = abs(all_adj_land_list[land]["mine_rate_v3"] - avg_mine_rate)
-                if all_adj_land_list[land]["mine_rate_v3"] < avg_mine_rate:
-                    record_confident /= avg_mine_rate
-                else:
-                    record_confident /= 0.8 - avg_mine_rate
-                if cond_confident > record_confident:
-                    all_adj_land_list[land]["mine_rate_v3"] = cond_mine_rate
-                    all_adj_land_list[land]["mine_rate_v3_history"].append((cond_mine_rate, condition["id"], ))
+                    cond_confident = abs(cond_mine_rate - avg_mine_rate)
+                    if cond_mine_rate < avg_mine_rate:
+                        cond_confident /= avg_mine_rate
+                    else:
+                        cond_confident /= confirm_rate - avg_mine_rate
+                    record_confident = abs(all_adj_land_list[land]["mine_rate_v3"] - avg_mine_rate)
+                    if all_adj_land_list[land]["mine_rate_v3"] < avg_mine_rate:
+                        record_confident /= avg_mine_rate
+                    else:
+                        record_confident /= confirm_rate - avg_mine_rate
+                    if cond_confident > record_confident:
+                        all_adj_land_list[land]["mine_rate_v3"] = cond_mine_rate
+                        all_adj_land_list[land]["mine_rate_v3_history"].append((cond_mine_rate, condition["id"], ))
 
                 # version selection
                 all_adj_land_list[land]["mine_rate"] = all_adj_land_list[land]["mine_rate_v3"]
@@ -2074,17 +2124,17 @@ class Bot(QRunnable):
                 .replace("0.", ".") \
                 .replace("1.00", "1.0")
             if land["mine_rate"] == max_mine_rate:
-                if Game().ui.ui_activated:
+                if Game().ui is not None and Game().ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#e08080")
                 high_mine_rate_list.append(_id)
                 rate_dict[_id] = land["mine_rate"]
             elif land["mine_rate"] == min_mine_rate:
-                if Game().ui.ui_activated:
+                if Game().ui is not None and Game().ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#80e080")
                 high_safe_rate_list.append(_id)
                 rate_dict[_id] = land["mine_rate"]
             else:
-                if Game().ui.ui_activated:
+                if Game().ui is not None and Game().ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#909090")
         avg_cover = "{:.2f}" \
             .format(avg_mine_rate) \
@@ -2095,17 +2145,17 @@ class Bot(QRunnable):
                 continue
         for _id, land in none_adj_land_list.items():
             if max_mine_rate == avg_mine_rate:
-                if Game().ui.ui_activated:
+                if Game().ui is not None and Game().ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#e08080")
                 high_mine_rate_list.append(_id)
                 rate_dict[_id] = avg_mine_rate
             elif min_mine_rate == avg_mine_rate:
-                if Game().ui.ui_activated:
+                if Game().ui is not None and Game().ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#80e080")
                 high_safe_rate_list.append(_id)
                 rate_dict[_id] = avg_mine_rate
             else:
-                if Game().ui.ui_activated:
+                if Game().ui is not None and Game().ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#909090")
 
         print(f"[bot] "
@@ -2114,6 +2164,40 @@ class Bot(QRunnable):
               f"possible_safe_list: {len(high_safe_rate_list)} ({min_mine_rate:.2f}), "
               f"avg: {avg_mine_rate:.2f}")
         return high_mine_rate_list, high_safe_rate_list, rate_dict
+
+    def analyse_mark_count(self, possible_mine_list, possible_safe_list, possibility_dict):
+        mine_field = Game().mine_field
+        if len(possible_safe_list) > 0:
+            choice_list = possible_safe_list
+        else:
+            choice_list = [land.id for land in mine_field.land_list if not land.checked and land.cover not in [
+                SYMBOL_FLAG,
+                SYMBOL_UNKNOWN,
+            ]]
+            if len(choice_list) > len(possible_mine_list):
+                choice_list = [land_id for land_id in choice_list[:] if land_id not in possible_mine_list]
+
+        # print("choice_list", len(choice_list))
+
+        if choice_list[0] in possibility_dict and possibility_dict[choice_list[0]] > 0.3:  # >= 1/3
+            mark_count = dict()
+            min_mark_count = mine_field.mine_count
+            for land_id in choice_list:
+                mark_count[land_id] = \
+                    mine_field.row_mark_count(land_id) \
+                    + mine_field.col_mark_count(land_id) \
+                    + mine_field.range_mark_count(land_id, 2)
+                min_mark_count = min(min_mark_count, mark_count[land_id])
+
+            print("[bot]", "choice_list:", "[" + ", ".join([f"{x}: {mark_count[x]}" for x in choice_list]) + "]")
+
+            choice_list = [x for x in choice_list[:] if mark_count[x] == min_mark_count]
+
+            # for land_id in choice_list:
+            #     print(land_id, mark_count[land_id])
+            # print("choice_list filter by mine count", len(choice_list), choice_list)
+
+        self.random_choice_list = choice_list[:]
 
     @staticmethod
     def is_include(a, b, func):
@@ -2258,6 +2342,39 @@ class BotStat:
             if game_result in ["WIN", "LOSE"]:
                 self.record_list[self.current]["win"] = game_result == "WIN"
             # print(self.record_list[self.current])
+
+    def to_console(self):
+        if len(self.record_list) > 0:
+            r = self.record_list[-1]
+            win = len([r for r in self.record_list if r["win"] is True])
+            lose = len([r for r in self.record_list if r["win"] is False])
+            win_rate = 0
+            if win + lose > 0:
+                win_rate = win / (win + lose)
+            click = sum([r["click"] for r in self.record_list])
+            mark = sum([r["mark"] for r in self.record_list])
+            guess = sum([r["random_click"] for r in self.record_list])
+            guess_suc_rate = 0
+            if guess > 0:
+                guess_suc_rate = (guess - lose) / guess
+            total_time = sum([r["usage_time"] for r in self.record_list if r["win"] is True])
+            avg_time = 0
+            if win > 0:
+                avg_time = total_time / win
+
+            # print("[stat]", r)
+            print(
+                "[stat]",
+                f"No.{r["no"]}: {"WIN" if r["win"] else "LOSE"}, "
+                f"Click/Mark: {r["click"]}/{r["mark"]}, "
+                f"Guess: {r["random_click"]}, "
+                f"Usage time: {r["usage_time"]:.6f}, "
+                f"Total Win/Lose: {win}/{lose}, "
+                f"Total Win Rate: {win_rate * 100:.2f}%, "
+                f"Total Click/Mark/Guess: {click}/{mark}/{guess}, "
+                f"Guess Success Rate: {guess_suc_rate * 100:.2f}%, "
+                f"Avg. Usage Time: {avg_time:.6f}"
+            )
 
 
 if __name__ == '__main__':
