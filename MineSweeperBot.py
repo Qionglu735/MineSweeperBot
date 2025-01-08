@@ -125,7 +125,7 @@ class Land(object):
         field_width = self.mine_field.field_width
         field_height = self.mine_field.field_height
 
-        if Game().game_terminated or not Game().game_terminated and self.cover in [
+        if Game().terminated or not Game().terminated and self.cover in [
             SYMBOL_FLAG,
             SYMBOL_UNKNOWN,
         ]:
@@ -147,7 +147,7 @@ class Land(object):
         # check if click on mine
         self.mine_field.check_end_game(self.x, self.y)
 
-        if not self.mine_field.game.game_terminated:
+        if not self.mine_field.game.terminated:
             flag_num = 0
             for x, y in itertools.product([-1, 0, 1], [-1, 0, 1]):
                 if x == 0 and y == 0:
@@ -190,7 +190,7 @@ class Land(object):
 
             if self.mine_field.game.ui is not None:
                 self.mine_field.game.ui.update_title()
-                if not self.mine_field.game.game_terminated:
+                if not self.mine_field.game.terminated:
                     self.mine_field.game.ui.set_message(
                         f"{self.mine_field.mine_count - self.mine_field.marked_land_count()} mines left")
 
@@ -199,7 +199,7 @@ class Land(object):
         self.left_click()
 
     def right_click(self):
-        if not self.mine_field.game.game_terminated:
+        if not self.mine_field.game.terminated:
             # print(f"Mark  ({self.x}, {self.y})")
             if not self.checked:
                 if self.cover == SYMBOL_BLANK:
@@ -227,7 +227,7 @@ class Land(object):
 
     def auto_mark(self):
         # print(f"Auto Mark")
-        while not self.mine_field.game.game_terminated and self.cover != SYMBOL_FLAG:
+        while not self.mine_field.game.terminated and self.cover != SYMBOL_FLAG:
             self.right_click()
 
     def to_string(self):
@@ -330,7 +330,7 @@ class MineField(object):
                     land.content = f"{land.adjacent_mine_count}"
                 # land.ui.update_tooltip(Game().cheat_mode)
 
-        self.game.game_start_time = datetime.datetime.now()
+        self.game.start_time = datetime.datetime.now()
 
     def field_size(self):
         return {
@@ -395,9 +395,9 @@ class MineField(object):
 
     def check_end_game(self, x, y):
         if self.land_list[x + self.field_width * y].have_mine:
-            self.game.game_end_time = datetime.datetime.now()
-            self.game.game_terminated = True
-            self.game.game_result = "LOSE"
+            self.game.end_time = datetime.datetime.now()
+            self.game.terminated = True
+            self.game.result = "LOSE"
             if self.game.ui is not None:
                 self.game.ui.set_message("YOU LOSE")
             for land in self.land_list:
@@ -412,9 +412,9 @@ class MineField(object):
                         if land.ui is not None:
                             land.ui.update_display()
         elif self.revealed_land_count() == self.field_width * self.field_height - self.mine_count:
-            self.game.game_end_time = datetime.datetime.now()
-            self.game.game_terminated = True
-            self.game.game_result = "WIN"
+            self.game.end_time = datetime.datetime.now()
+            self.game.terminated = True
+            self.game.result = "WIN"
             if self.game.ui is not None:
                 self.game.ui.set_message("YOU WIN")
             for y in range(self.field_height):
@@ -463,10 +463,10 @@ class MineField(object):
 
 @singleton
 class Game(object):
-    game_terminated = False
-    game_start_time = None
-    game_end_time = None
-    game_result = None
+    terminated = False
+    start_time = None
+    end_time = None
+    result = None
     safety_level = SAFETY_LEVEL_DEFAULT
     cheat_mode = False
 
@@ -522,10 +522,10 @@ class Game(object):
             self.bot_looper.status.map_ready.emit()  # --> bot_looper
 
     def reset_status(self):
-        self.game_terminated = False
-        self.game_start_time = None
-        self.game_end_time = None
-        self.game_result = None
+        self.terminated = False
+        self.start_time = None
+        self.end_time = None
+        self.result = None
 
     def save(self, file_path, data=None):
         if self.ui is not None:
@@ -591,12 +591,12 @@ class Game(object):
 
     def bot_finished(self):  # <-- bot
         self.bot_looper.status.bot_finished.emit()  # --> bot_looper
-        self.bot_stat.record_game_result(self.game_result)
+        self.bot_stat.record_game_result(self.result)
         if self.ui is not None:
             self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
         else:
             self.bot_stat.to_console()
-        if self.game_terminated and self.game_result == "LOSE":
+        if self.terminated and self.result == "LOSE":
             now = datetime.datetime.now()
             if not os.path.isdir("screenshot"):
                 os.mkdir("screenshot")
@@ -1402,11 +1402,11 @@ class GameUI(QMainWindow):
 
     def update_time_label(self):
         time_delta = datetime.timedelta()
-        if self.game.game_start_time is not None:
-            if self.game.game_end_time is not None:
-                time_delta = self.game.game_end_time - self.game.game_start_time
+        if self.game.start_time is not None:
+            if self.game.end_time is not None:
+                time_delta = self.game.end_time - self.game.start_time
             else:
-                time_delta = datetime.datetime.now() - self.game.game_start_time
+                time_delta = datetime.datetime.now() - self.game.start_time
         display_second = time_delta.seconds
         display_milliseconds = time_delta.microseconds / 1000
         if time_delta.seconds > 999:
@@ -1521,12 +1521,12 @@ class GameUI(QMainWindow):
 
     def menu_bot_random_click(self):
         self.game.stop_looper()
-        if not self.game.game_terminated:
+        if not self.game.terminated:
             self.game.bot.random_click()
 
     def menu_bot_solve_once(self, allow_guess=False):
         self.game.stop_looper()
-        if not self.game.game_terminated:
+        if not self.game.terminated:
             if allow_guess:
                 self.game.start_bot(step=1, guess=1)
             else:
@@ -1534,7 +1534,7 @@ class GameUI(QMainWindow):
 
     def menu_bot_solve(self):
         self.game.stop_looper()
-        if not self.game.game_terminated:
+        if not self.game.terminated:
             self.game.bot.auto_click = True
             self.menu_action_dict["Auto Click"].setChecked(True)
             self.game.bot.auto_mark = True
@@ -1544,7 +1544,7 @@ class GameUI(QMainWindow):
 
     def menu_bot_solve_looping(self):
         if not self.game.bot_looper.looping:
-            if self.game.game_terminated:
+            if self.game.terminated:
                 self.game.new_game_setup()
             self.game.start_looper()
         else:
@@ -1787,7 +1787,7 @@ class Bot(QRunnable):
         self.result.stop_solving.connect(self.stop_solving)
 
     def game_update_completed(self):
-        if Game().game_terminated:
+        if Game().terminated:
             self.auto_solving = False
         self.game_updating = False
 
