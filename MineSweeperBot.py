@@ -618,9 +618,7 @@ class Game(object):
         try:
             self.bot_looper.looping = loop_times
             self.bot_pool.start(self.bot_looper)
-        except RuntimeError:
-            import traceback
-            traceback.print_exc()
+        except RuntimeError:  # RuntimeError: Internal C++ object (BotLooper) already deleted.
             self.bot_looper = BotLooper()
             self.bot_looper.status.init_map.connect(self.new_game_setup)
             self.bot_looper.status.start_bot.connect(self.start_bot)
@@ -1738,13 +1736,15 @@ class GameUI(QMainWindow):
         self.game.bot.result.game_update_completed.emit()  # --> bot
 
 
-UI = False
-PROCESS_COUNT = 5
+PROCESS_COUNT = 8
 LOOP_COUNT = 1000 * 1000 * 30
 
 
 def main():
-    if UI:
+    ui = "on"
+    if len(sys.argv) > 1 and sys.argv[1] == "--headless":
+        ui = "off"
+    if ui == "on":
         game_count = 1
     else:
         game_count = len(PRESET) * PROCESS_COUNT
@@ -1756,7 +1756,7 @@ def main():
     global_stat_queue = multiprocessing.Queue()
     game_list = list()
     for i in range(game_count):
-        game = multiprocessing.Process(target=create_new_game, args=(i, global_stat_queue, ))
+        game = multiprocessing.Process(target=create_new_game, args=(i, global_stat_queue, ui, ))
         game_list.append(game)
         game.start()
 
@@ -1773,9 +1773,9 @@ def main():
         game.join()
 
 
-def create_new_game(index, global_stat):
+def create_new_game(index, global_stat, ui):
     qt_app = QApplication(sys.argv)
-    if UI:
+    if ui == "on":
         qt_app.setStyle("Fusion")
         qt_app.setPalette(dark_theme.PALETTE)
 
@@ -1785,7 +1785,7 @@ def create_new_game(index, global_stat):
         field_height=PRESET[index % len(PRESET)][1],
         mine_count=PRESET[index % len(PRESET)][2],
     )
-    if UI:
+    if ui == "on":
         game.ui_init()
         game.ui_setup()
     else:
@@ -1822,7 +1822,7 @@ def process_global_stat(global_stat, r):
     print(
         f"[stat {preset_id}]",
         f"Game: {r["game_id"]:2d}, "
-        f"No.{no}: {"WIN " if r["win"] else "LOSE"}, "
+        f"No.{no}: {"WIN" if r["win"] else "LOSE"}, "
         f"Minefield: {PRESET[preset_id][0]}x{PRESET[preset_id][1]}/{PRESET[preset_id][2]}, "
         f"Click/Mark: {r["click"]}/{r["mark"]}, "
         f"Guess: {r["random_click"]}, "
