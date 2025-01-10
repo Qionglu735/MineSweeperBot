@@ -231,6 +231,67 @@ class Land(object):
         while not self.mine_field.game.terminated and self.cover != SYMBOL_FLAG:
             self.right_click()
 
+    def control_left_click(self):
+        if not self.mine_field.game.cheat_mode or self.mine_field.game.terminated:
+            self.ui.setChecked(self.checked)
+            return
+
+        if len([x for x in self.mine_field.land_list if x.have_mine is True]) == 0:
+            self.mine_field.generate_mine()
+
+        if self.checked:
+            self.checked = False
+        if not self.have_mine:
+            self.have_mine = True
+            self.content = SYMBOL_MINE
+            self.mine_field.mine_count += 1
+        else:
+            self.have_mine = False
+            if self.adjacent_mine_count == 0:
+                self.content = SYMBOL_BLANK
+            else:
+                self.content = f"{self.adjacent_mine_count}"
+            self.mine_field.mine_count -= 1
+
+        if self.ui is not None:
+            self.ui.setChecked(self.checked)
+            self.ui.update_display()
+
+        field_width = self.mine_field.field_width
+        field_height = self.mine_field.field_height
+        for x, y in itertools.product([-1, 0, 1], [-1, 0, 1]):
+            if x == 0 and y == 0:
+                continue
+            if 0 <= (self.x + x) < field_width and 0 <= (self.y + y) < field_height:
+                adj_land = self.mine_field.land_list[(self.x + x) + field_width * (self.y + y)]
+                if self.have_mine:
+                    adj_land.adjacent_mine_count += 1
+                else:
+                    adj_land.adjacent_mine_count -= 1
+                if not adj_land.have_mine:
+                    if adj_land.adjacent_mine_count == 0:
+                        adj_land.content = SYMBOL_BLANK
+                    else:
+                        adj_land.content = f"{adj_land.adjacent_mine_count}"
+                if adj_land.ui is not None:
+                    adj_land.ui.update_display()
+        if self.mine_field.game.ui is not None:
+            self.mine_field.game.ui.update_title()
+
+    def control_right_click(self):
+        if not self.mine_field.game.cheat_mode or self.mine_field.game.terminated:
+            return
+
+        if self.checked:
+            self.checked = False
+
+        if self.ui is not None:
+            self.ui.setChecked(self.checked)
+            self.ui.update_display()
+
+        if self.mine_field.game.ui is not None:
+            self.mine_field.game.ui.update_title()
+
     def to_string(self):
         return f"{self.id} ({self.x}, {self.y})"
 
@@ -692,11 +753,17 @@ class LandUI(QPushButton):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
-    def left_click(self, chain=False):
-        self.land.left_click(chain)
+    def left_click(self):
+        if QApplication.keyboardModifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.land.control_left_click()
+        else:
+            self.land.left_click()
 
     def right_click(self):
-        self.land.right_click()
+        if QApplication.keyboardModifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.land.control_right_click()
+        else:
+            self.land.right_click()
 
     def update_display(self, custom_cover=None, custom_color=None):
         style_sheet = self.style_sheet
@@ -769,11 +836,11 @@ class MineFieldUI(QWidget):
             while grid.count() > 0:
                 grid.itemAt(0).widget().setParent(None)
 
-    def add_land(self, land, y, x):
-        land.clicked.connect(self.left_click)
-        land.customContextMenuRequested.connect(self.right_click)
+    def add_land(self, land_ui, y, x):
+        land_ui.clicked.connect(self.left_click)
+        land_ui.customContextMenuRequested.connect(self.right_click)
         grid = self.layout()
-        grid.addWidget(land, y, x)
+        grid.addWidget(land_ui, y, x)
 
     def left_click(self):
         self.sender().left_click()
@@ -1342,6 +1409,11 @@ class GameUI(QMainWindow):
                 None, self.menu_protective_measure,
                 check_able=True, checked=(self.game.safety_level >= 2)))
         option_menu.addSeparator()
+        option_menu.addAction(
+            self.create_menu_action(
+                "Cheat Mode", "Cheat Mode",
+                Qt.Key.Key_T, self.menu_switch_cheat_mode,
+                check_able=True, checked=False))
 
         # Menu: About
         about_menu = menu.addMenu("&About")
@@ -1581,6 +1653,13 @@ class GameUI(QMainWindow):
             else:
                 self.game.safety_level = 0
 
+    def menu_switch_cheat_mode(self):
+        self.game.cheat_mode = not self.game.cheat_mode
+        print(f"CHEAT_MODE: {self.game.cheat_mode}")
+        for land in self.game.mine_field.land_list:
+            land.ui.update_display()
+        self.set_message(f"Cheat Mode: {"On" if self.game.cheat_mode else "Off"}")
+
     @staticmethod
     def menu_about():
         webbrowser.open("https://github.com/Qionglu735/MineSweeperBot")
@@ -1635,13 +1714,6 @@ class GameUI(QMainWindow):
             if modifiers == Qt.KeyboardModifier.ShiftModifier:
                 new_count = self.game.mine_field.mine_count - 5
             self.game.new_game_setup(mine_count=new_count)
-
-        elif event.key() == Qt.Key.Key_T:
-            self.game.cheat_mode = not self.game.cheat_mode
-            print(f"CHEAT_MODE: {self.game.cheat_mode}")
-            for land in self.game.mine_field.land_list:
-                # land.ui.update_tooltip(self.game.cheat_mode)
-                land.ui.update_display()
 
         elif event.key() == Qt.Key.Key_F and modifiers == Qt.KeyboardModifier.ControlModifier:
             print("allow_guess")
