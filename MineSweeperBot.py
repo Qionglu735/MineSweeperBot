@@ -1,3 +1,4 @@
+import traceback
 
 from PySide6.QtCore import QObject, Qt, QRunnable, Slot, QThreadPool, Signal, QEvent, QTimer
 from PySide6.QtGui import QIcon, QAction, QIntValidator, QScreen, QKeySequence, QFont
@@ -88,17 +89,6 @@ COLOR_DICT = {
 }
 
 BUTTON_SIZE_DEFAULT = 20
-
-
-def singleton(cls):
-    instances = dict()
-
-    def get_instance(*args, **kwargs):
-        if cls not in instances:
-            instances[cls] = cls(*args, **kwargs)
-        return instances[cls]
-
-    return get_instance
 
 
 class Land(object):
@@ -1965,7 +1955,12 @@ class Bot(QRunnable):
         while self.auto_solving and self.auto_step != 0:
             self.data_before_solve = self.game.mine_field.save()
             self.game_updating = True
+            # import traceback
+            # try:
             solve_success = self.solve()
+            # except Exception:
+            #     traceback.print_exc()
+            #     solve_success = False
             if not solve_success:
                 break
             if self.auto_step > 0:
@@ -1977,7 +1972,7 @@ class Bot(QRunnable):
         self.result.bot_finished.emit()
 
     def solve(self):
-        self.collect_condition()
+        self.collect_condition(shuffle_result=True if self.auto_step == -1 else False)
         # print("[Bot] Try to analyse ...")
         if all([land.checked is False for land in self.game.mine_field.land_list]):
             if self.auto_click:
@@ -1988,28 +1983,29 @@ class Bot(QRunnable):
                 self.result.emote.emit(":(")
                 self.result.message.emit(f"No conclusion found")
                 return False
-        land_id, have_mine = self.analyse_condition()
-        if land_id is not None:
-            land = self.game.mine_field.land(land_id)
-            if not have_mine:
-                if self.auto_click:
-                    self.result.click.emit(land)
+        confirm_result_dict = self.analyse_condition(return_instantly=True if self.auto_step == -1 else False)
+        if len(confirm_result_dict.keys()) > 0:
+            for land_id, have_mine in confirm_result_dict.items():
+                land = self.game.mine_field.land(land_id)
+                if not have_mine:
+                    if self.auto_click:
+                        self.result.click.emit(land)
+                    else:
+                        print(f"[Bot] ({land.x}, {land.y}) {land.id} is empty")
+                        self.result.message.emit(f"({land.x + 1}, {land.y + 1}) is empty")
+                        self.result.highlight.emit(land, "safe")
                 else:
-                    print(f"[Bot] ({land.x}, {land.y}) {land.id} is empty")
-                    self.result.message.emit(f"({land.x + 1}, {land.y + 1}) is empty")
-                    self.result.highlight.emit(land, "safe")
-            else:
-                if self.auto_mark:
-                    self.result.mark.emit(land)
-                else:
-                    print(f"[Bot] ({land.x}, {land.y}) {land.id} have mine")
-                    self.result.message.emit(f"({land.x + 1}, {land.y + 1}) have mine")
-                    self.result.highlight.emit(land, "danger")
-            self.result.emote.emit(":D")
-            self.random_choice_list = list()
-            if self.debug_print:
-                for cond in self.condition_list:
-                    print(cond)
+                    if self.auto_mark:
+                        self.result.mark.emit(land)
+                    else:
+                        print(f"[Bot] ({land.x}, {land.y}) {land.id} have mine")
+                        self.result.message.emit(f"({land.x + 1}, {land.y + 1}) have mine")
+                        self.result.highlight.emit(land, "danger")
+                self.result.emote.emit(":D")
+                self.random_choice_list = list()
+                if self.debug_print:
+                    for cond in self.condition_list:
+                        print(cond)
             return True
         else:
             self.result.emote.emit(":(")
@@ -2026,7 +2022,7 @@ class Bot(QRunnable):
                 self.result.message.emit(f"No conclusion found")
                 return False
 
-    def collect_condition(self):
+    def collect_condition(self, shuffle_result=False):
         mine_field = self.game.mine_field
         self.condition_list = list()
         self.condition_id_list = list()
@@ -2061,6 +2057,8 @@ class Bot(QRunnable):
                                 condition["possible_mine"] -= 1
 
                 if condition["possible_mine"] > 0 or len(condition["adj_land"]) > 0:
+                    if shuffle_result:
+                        shuffle(condition["adj_land"])
                     self.condition_list.append(condition)
             # if not land.checked and land.cover != SYMBOL_FLAG:
             #     self.global_condition["adj_land"].append(land.id)
@@ -2068,9 +2066,10 @@ class Bot(QRunnable):
         # self.condition_list.append(global_cond)
 
         for cond in self.condition_list:
-            cond["id"] = f"{cond["land"]}:{",".join([str(x) for x in cond["adj_land"]])}"
+            cond["id"] = f"{cond["land"]}:{",".join([str(x) for x in sorted(cond["adj_land"])])}"
             self.condition_id_list.append(cond["id"])
-        shuffle(self.condition_list)
+        if shuffle_result:
+            shuffle(self.condition_list)
 
         # self.global_condition["id"] = \
         #     f"{self.global_condition["land"]}:{",".join([str(x) for x in self.global_condition["adj_land"]])}"
@@ -2093,39 +2092,67 @@ class Bot(QRunnable):
             self.result.random_click.emit(land_list[x])
         return True
 
-    def analyse_condition(self):
+    def analyse_condition(self, return_instantly=False):
         global_condition_added = False
+        confirm_result_dict = dict()
         while True:
             for condition in self.condition_list:
                 if condition["possible_mine"] == 0:
-                    return condition["adj_land"][0], False
+                    for land in condition["adj_land"]:
+                        if land not in confirm_result_dict:
+                            confirm_result_dict[land] = False
+                            if return_instantly:
+                                return confirm_result_dict
+                        elif confirm_result_dict[land] is not False:
+                            print("conflict 01:", land)
 
                 elif condition["possible_mine"] == len(condition["adj_land"]):
-                    return condition["adj_land"][0], True
+                    for land in condition["adj_land"]:
+                        if land not in confirm_result_dict:
+                            confirm_result_dict[land] = True
+                            if return_instantly:
+                                return confirm_result_dict
+                        elif confirm_result_dict[land] is not True:
+                            print("conflict 02:", land)
 
             condition_updated = False
             for a, b in itertools.product(range(len(self.condition_list)), range(len(self.condition_list))):
                 if a >= b:
                     continue
-                cond_a, cond_b = self.condition_list[a], self.condition_list[b]
-                if cond_a["land"] == cond_b["land"]:
-                    continue
+                if len(self.condition_list[a]["adj_land"]) >= len(self.condition_list[b]["adj_land"]):
+                    cond_a, cond_b = self.condition_list[a], self.condition_list[b]
+                else:
+                    cond_a, cond_b = self.condition_list[b], self.condition_list[a]
+                # if cond_a["land"] == cond_b["land"]:
+                #     continue
+                sub_adj, inter_adj, cond_a_new_adj, cond_b_new_adj = \
+                    self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x)
                 if self.is_include(cond_a["adj_land"], cond_b["adj_land"], lambda x: x):
                     if cond_a["possible_mine"] == cond_b["possible_mine"]:
-                        if len(cond_a["adj_land"]) != len(cond_b["adj_land"]):
-                            empty_land = self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x)[0][0]
-                            return empty_land, False
+                        if len(sub_adj) > 0:
+                            for land in sub_adj:
+                                if land not in confirm_result_dict:
+                                    confirm_result_dict[land] = False
+                                    if return_instantly:
+                                        return confirm_result_dict
+                                elif confirm_result_dict[land] is not False:
+                                    print("conflict 11:", land)
 
                     else:  # cond_a["possible_mine"] != cond_b["possible_mine"]
-                        possible_mine_land, cond_a_new_adj, cond_b_new_adj = \
-                            self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x)
-                        if abs(cond_a["possible_mine"] - cond_b["possible_mine"]) \
-                                == abs(len(cond_a["adj_land"]) - len(cond_b["adj_land"])):
-                            return possible_mine_land[0], True
-                        elif len(cond_a_new_adj) > 0:
+                        if abs(cond_a["possible_mine"] - cond_b["possible_mine"]) == len(sub_adj):
+                            if len(sub_adj) > 0:
+                                for land in sub_adj:
+                                    if land not in confirm_result_dict:
+                                        confirm_result_dict[land] = True
+                                        if return_instantly:
+                                            return confirm_result_dict
+                                    elif confirm_result_dict[land] is not True:
+                                        print("conflict 12:", land)
+
+                        else:  # len(cond_a_new_adj) > 0
                             cond_a_new = cond_a.copy()
                             cond_a_new.update({
-                                "id": f"{cond_a_new["land"]}:{",".join([str(x) for x in cond_a_new_adj])}",
+                                "id": f"{cond_a_new["land"]}:{",".join([str(x) for x in sorted(cond_a_new_adj)])}",
                                 "adj_land": cond_a_new_adj,
                                 "possible_mine": cond_a["possible_mine"] - cond_b["possible_mine"],
                                 "type": f"({cond_a["type"]}) - ({cond_b["type"]})",
@@ -2134,19 +2161,6 @@ class Bot(QRunnable):
                             if cond_a_new["id"] not in self.condition_id_list:
                                 self.condition_list.append(cond_a_new)
                                 self.condition_id_list.append(cond_a_new["id"])
-                                condition_updated = True
-                        else:  # len(cond_b_new_adj) > 0:
-                            cond_b_new = cond_b.copy()
-                            cond_b_new.update({
-                                "id": f"{cond_b_new["land"]}:{",".join([str(x) for x in cond_b_new_adj])}",
-                                "adj_land": cond_b_new_adj,
-                                "possible_mine": cond_b["possible_mine"] - cond_a["possible_mine"],
-                                "type": f"({cond_b["type"]}) - ({cond_a["type"]})",
-                                "history": f"{cond_b["id"]} - {cond_a["id"]}",
-                            })
-                            if cond_b_new["id"] not in self.condition_id_list:
-                                self.condition_list.append(cond_b_new)
-                                self.condition_id_list.append(cond_b_new["id"])
                                 condition_updated = True
 
             # if not condition_updated and not global_condition_added:
@@ -2196,7 +2210,9 @@ class Bot(QRunnable):
             #     global_condition_added = True
             if not condition_updated:
                 break
-        return None, None
+        # for cond in self.condition_list:
+        #     print(cond)
+        return confirm_result_dict
 
     def analyse_possibility(self) -> (list, list, dict, ):
         mine_field = self.game.mine_field
@@ -2366,38 +2382,36 @@ class Bot(QRunnable):
     @staticmethod
     def is_include(a, b, func):
         if len(a) < len(b):
-            tmp = a
-            a = b
-            b = tmp
+            _b, _a = sorted(a), sorted(b)
+        else:
+            _a, _b = sorted(a), sorted(b)
         i, j, k = 0, 0, 0
-        while i < len(a) and j < len(b):
-            if func(a[i]) == func(b[j]):
+        while i < len(_a) and j < len(_b):
+            if func(_a[i]) == func(_b[j]):
                 i += 1
                 j += 1
                 k += 1
-            elif func(a[i]) < func(b[j]):
+            elif func(_a[i]) < func(_b[j]):
                 i += 1
             else:
                 j += 1
-        return k == len(b)
+        return k == len(_b)
 
     @staticmethod
     def sub(a, b, func):
         i, j = 0, 0
-        _a, _b = a[:], b[:]
+        _a, _b, _c = sorted(a), sorted(b), list()
         while i < len(_a) and j < len(_b):
             __a, __b = func(_a[i]), func(_b[j])
             if __a == __b:
+                _c.append(_a[i])
                 _a.remove(_a[i])
                 _b.remove(_b[j])
             elif __a < __b:
                 i += 1
             else:
                 j += 1
-        if len(_a) != 0:
-            return _a, _a, list()
-        else:
-            return _b, list(), _b
+        return _a if len(_a) > 0 else _b, _c, _a, _b
 
 
 class BotLooper(QRunnable):
