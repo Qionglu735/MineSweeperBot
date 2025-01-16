@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QDialog, QToolBar, QSiz
 from PySide6.QtWidgets import QWidget, QGridLayout, QFileDialog
 from PySide6.QtWidgets import QPushButton, QLabel, QLineEdit, QComboBox, QFrame
 from inspect import currentframe, getframeinfo
-from random import seed, randint, shuffle
+from random import randint, shuffle
 
 import datetime
 import functools
@@ -580,6 +580,12 @@ class Game(object):
         self.end_time = None
         self.result = None
 
+    def default_save_name(self):
+        now = datetime.datetime.now()
+        num_len = len(str(len(self.mine_field.land_list)))
+        return f"{now.strftime("%Y_%m_%d_%H_%M_%S_%f")}" \
+               f"___{self.mine_field.revealed_land_count():0{num_len}}_{len(self.mine_field.land_list)}"
+
     def save(self, file_path, data=None):
         if self.ui is not None:
             pixmap = self.ui.take_screenshot()
@@ -647,10 +653,9 @@ class Game(object):
         self.bot_stat.record_game_result(self.result)
         file_path = None
         if self.terminated and self.result == "LOSE":
-            now = datetime.datetime.now()
             if not os.path.isdir("screenshot"):
                 os.mkdir("screenshot")
-            file_path = f"screenshot/{now.strftime("%Y_%m_%d_%H_%M_%S_%f")}.png"
+            file_path = f"screenshot/{self.default_save_name()}.png"
             self.save(file_path, self.bot.data_before_solve)
         if self.ui is not None:
             self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
@@ -1220,7 +1225,7 @@ class GameUI(QMainWindow):
     button_size = BUTTON_SIZE_DEFAULT
     ui_activated = True
     ui_opacity_max = 1000
-    ui_opacity = ui_opacity_max
+    ui_opacity = ui_opacity_max / 3 / 2
     statistic_dialog = None
 
     menu_action_dict = dict()
@@ -1547,7 +1552,7 @@ class GameUI(QMainWindow):
         file_path, _ = QFileDialog.getSaveFileName(
             None,
             "Save to file",
-            f"{datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")}",
+            f"{self.game.default_save_name()}",
             "PNG (*.png);;All Files (*)"
         )
         if file_path:
@@ -1779,13 +1784,14 @@ class GameUI(QMainWindow):
 
     def event(self, event):
         if isinstance(event, QEvent):
+            # print(QEvent.Type(event.type()).name)
             if event.type() == QEvent.Type.WindowActivate:
                 self.ui_activated = True
                 self.ui_opacity = min(self.ui_opacity * 2, self.ui_opacity_max)
                 self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
             elif event.type() == QEvent.Type.WindowDeactivate:
                 self.ui_activated = False
-                self.ui_opacity = max(1, int(self.ui_opacity / 2))
+                self.ui_opacity = max(1, self.ui_opacity / 2)
                 self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
             return super().event(event)
         else:
@@ -2031,16 +2037,17 @@ class Bot(QRunnable):
         mine_field = self.game.mine_field
         self.condition_list = list()
         self.condition_id_list = list()
-        land_list = mine_field.land_list[:]
-        # shuffle(land_list)
         # self.global_condition = {
         #     "id": "",
         #     "land": -9,
         #     "possible_mine": mine_field.mine_count - mine_field.marked_land_count(),
+        #     "possible_mine_min": -1,
         #     "adj_land": list(),
-        #     "type": "global",
+        #     "derivation": "-9",
+        #     "final_cal": "",
         # }
-        for land in land_list:
+        # self.global_condition["possible_mine_min"] = self.global_condition["possible_mine"]
+        for land in mine_field.land_list:
             if land.checked and land.adjacent_mine_count != 0:
                 x, y = land.x, land.y
                 condition = {
@@ -2049,7 +2056,7 @@ class Bot(QRunnable):
                     "possible_mine": land.adjacent_mine_count,
                     "possible_mine_min": -1,
                     "adj_land": list(),
-                    "derivation": land.id,
+                    "derivation": f"{land.id}",
                     "final_cal": "",
                 }
                 for _x, _y in itertools.product([-1, 0, 1], [-1, 0, 1]):
@@ -2068,6 +2075,7 @@ class Bot(QRunnable):
                         shuffle(condition["adj_land"])
                     condition["possible_mine_min"] = condition["possible_mine"]
                     self.condition_list.append(condition)
+
             # if not land.checked and land.cover != SYMBOL_FLAG:
             #     self.global_condition["adj_land"].append(land.id)
 
@@ -2076,11 +2084,9 @@ class Bot(QRunnable):
         for cond in self.condition_list:
             cond["id"] = self.generate_cond_id(cond)
             self.condition_id_list.append(cond["id"])
+
         if shuffle_result:
             shuffle(self.condition_list)
-
-        # self.global_condition["id"] = \
-        #     f"{self.global_condition["land"]}:{",".join([str(x) for x in self.global_condition["adj_land"]])}"
 
     def random_click(self, is_first_click=False):
         mine_field = self.game.mine_field
@@ -2201,51 +2207,22 @@ class Bot(QRunnable):
                             #     print("3 ==/", cond_new)
                             #     print("3 dup", cond_dup)
 
-            # if not condition_updated and not global_condition_added:
-            #     cond_a = self.global_condition.copy()
-            #     for cond_b in self.condition_list:
-            #         if cond_b["id"].startswith("sub_"):
-            #             continue
-            #         if self.is_include(cond_a["adj_land"], cond_b["adj_land"], lambda x: x):
-            #             if cond_a["possible_mine"] == cond_b["possible_mine"]:
-            #                 if len(cond_a["adj_land"]) != len(cond_b["adj_land"]):
-            #                     empty_land = self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x)[0][0]
-            #                     return empty_land, False
+            # if len(confirm_result_dict) == 0 and not condition_updated and not global_condition_added:
+            #     print("condition_list len:", len(self.condition_list))
             #
-            #             else:  # cond_a["possible_mine"] != cond_b["possible_mine"]
-            #                 possible_mine_land, cond_a_new_adj, cond_b_new_adj = \
-            #                     self.sub(cond_a["adj_land"], cond_b["adj_land"], lambda x: x)
-            #                 if abs(cond_a["possible_mine"] - cond_b["possible_mine"]) \
-            #                         == abs(len(cond_a["adj_land"]) - len(cond_b["adj_land"])):
-            #                     return possible_mine_land[0], True
-            #                 elif len(cond_a_new_adj) > 0:
-            #                     cond_a_new = cond_a.copy()
-            #                     cond_a_new.update({
-            #                         "id": f"{cond_a_new["land"]}:{",".join([str(x) for x in cond_a_new_adj])}",
-            #                         "adj_land": cond_a_new_adj,
-            #                         "possible_mine": cond_a["possible_mine"] - cond_b["possible_mine"],
-            #                         "type": f"({cond_a["type"]}) - ({cond_b["type"]})",
-            #                         "history": f"{cond_a["id"]} - {cond_b["id"]}",
-            #                     })
-            #                     if cond_a_new["id"] not in self.condition_id_list:
-            #                         self.condition_list.append(cond_a_new)
-            #                         self.condition_id_list.append(cond_a_new["id"])
-            #                         condition_updated = True
-            #                 # else:  # len(cond_b_new_adj) > 0:
-            #                 #     cond_b_new = cond_b.copy()
-            #                 #     cond_b_new.update({
-            #                 #         "id": f"sub_{cond_b_new["land"]}:{",".join([str(x) for x in cond_b_new_adj])}",
-            #                 #         "adj_land": cond_b_new_adj,
-            #                 #         "possible_mine": cond_b["possible_mine"] - cond_a["possible_mine"],
-            #                 #     })
-            #                 #     if cond_b_new["id"] not in self.condition_id_list:
-            #                 #         self.condition_list.append(cond_b_new)
-            #                 #         self.condition_id_list.append(cond_b_new["id"])
-            #                 #         condition_updated = True
-            #     # self.condition_list.append(self.global_condition)
-            #     # self.condition_id_list.append(self.global_condition["id"])
-            #     # condition_updated = True
+            #     self.global_condition["id"] = self.generate_cond_id(self.global_condition)
+            #
+            #     self.condition_list.append(self.global_condition)
+            #     self.condition_id_list.append(self.global_condition["id"])
+            #
+            #     print("global_condition added")
+            #
+            #     condition_updated = True
             #     global_condition_added = True
+            #
+            # if global_condition_added:
+            #     print("condition_list len:", len(self.condition_list))
+
             if not condition_updated:
                 break
         # for cond in self.condition_list:
