@@ -403,6 +403,18 @@ class MineField(object):
                 return land
         return None
 
+    def set_focus(self, _id):
+        land = self.get_focus()
+        land.focus = False
+        if land.ui is not None:
+            land.ui.update_display()
+        for land in self.land_list:
+            if land.id == _id:
+                land.focus = True
+                if land.ui is not None:
+                    land.ui.update_display()
+                break
+
     def revealed_land_count(self):
         return len([x for x in self.land_list if x.checked])
 
@@ -582,9 +594,13 @@ class Game(object):
 
     def default_save_name(self):
         now = datetime.datetime.now()
-        num_len = len(str(len(self.mine_field.land_list)))
+        land_count = len(self.mine_field.land_list)
+        num_len = len(str(land_count))
+        unsolved_count = land_count \
+            - self.mine_field.revealed_land_count() \
+            - self.mine_field.marked_land_count()
         return f"{now.strftime("%Y_%m_%d_%H_%M_%S_%f")}" \
-               f"___{self.mine_field.revealed_land_count():0{num_len}}_{len(self.mine_field.land_list)}"
+               f"___{unsolved_count:0{num_len}}_{land_count}"
 
     def save(self, file_path, data=None):
         if self.ui is not None:
@@ -653,10 +669,13 @@ class Game(object):
         self.bot_stat.record_game_result(self.result)
         file_path = None
         if self.terminated and self.result == "LOSE":
+            _id = self.mine_field.get_focus().id
+            self.mine_field.load(self.bot.data_before_solve)
+            self.mine_field.set_focus(_id)
             if not os.path.isdir("screenshot"):
                 os.mkdir("screenshot")
             file_path = f"screenshot/{self.default_save_name()}.png"
-            self.save(file_path, self.bot.data_before_solve)
+            self.save(file_path)
         if self.ui is not None:
             self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
         else:
@@ -1736,10 +1755,7 @@ class GameUI(QMainWindow):
                 elif event.key() in [Qt.Key.Key_D, Qt.Key.Key_Right]:
                     focus_land_new = self.game.mine_field.land(x=focus_land.x + 1, y=focus_land.y)
                 if focus_land_new != focus_land:
-                    focus_land.focus = False
-                    focus_land_new.focus = True
-                    focus_land.ui.update_display()
-                    focus_land_new.ui.update_display()
+                    self.game.mine_field.set_focus(focus_land_new.id)
 
         elif event.key() == Qt.Key.Key_X:
             focus_land = self.game.mine_field.get_focus()
