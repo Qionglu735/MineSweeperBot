@@ -221,7 +221,7 @@ class Land(object):
             self.right_click()
 
     def control_left_click(self):
-        if not self.mine_field.game.cheat_mode or self.mine_field.game.terminated:
+        if not self.mine_field.game.edit_mode or self.mine_field.game.terminated:
             self.ui.setChecked(self.checked)
             return
 
@@ -268,7 +268,7 @@ class Land(object):
             self.mine_field.game.ui.update_title()
 
     def control_right_click(self):
-        if not self.mine_field.game.cheat_mode or self.mine_field.game.terminated:
+        if not self.mine_field.game.edit_mode or self.mine_field.game.terminated:
             return
 
         if self.checked:
@@ -531,7 +531,7 @@ class Game(object):
     end_time = None
     result = None
     safety_level = SAFETY_LEVEL_DEFAULT
-    cheat_mode = False
+    edit_mode = False
 
     mine_field = None
 
@@ -784,8 +784,11 @@ class LandUI(QPushButton):
         if self.land.focus:
             self.setFocus()
             style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #a3a323;")
-        if self.land.mine_field.game.cheat_mode and self.land.content == SYMBOL_MINE:
-            style_sheet = style_sheet.replace("/* BACKGROUND_STYLE */", "background-color: #532929;")
+        if self.land.mine_field.game.edit_mode and self.land.content == SYMBOL_MINE:
+            if self.land.focus:
+                style_sheet = style_sheet.replace("/* BACKGROUND_STYLE */", "background-color: #793737;")
+            else:
+                style_sheet = style_sheet.replace("/* BACKGROUND_STYLE */", "background-color: #432929;")
         else:
             style_sheet = style_sheet.replace("/* BACKGROUND_STYLE */", "background-color: #292929;")
         self.setChecked(self.land.checked)
@@ -828,9 +831,9 @@ class LandUI(QPushButton):
     def highlight(self, _type):
         style_sheet = self.styleSheet()
         if _type == "danger":
-            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #a02020;")
+            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #a32323;")
         elif _type == "safe":
-            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #20a020;")
+            style_sheet = style_sheet.replace("/* BORDER_STYLE */", "border: 2px solid #23a323;")
         self.setStyleSheet(style_sheet)
 
 
@@ -1424,8 +1427,8 @@ class GameUI(QMainWindow):
         option_menu.addSeparator()
         option_menu.addAction(
             self.create_menu_action(
-                "Cheat Mode", "Cheat Mode",
-                Qt.Key.Key_T, self.menu_switch_cheat_mode,
+                "Edit Mode", "Edit Mode",
+                Qt.Key.Key_T, self.menu_switch_edit_mode,
                 check_able=True, checked=False))
 
         # Menu: About
@@ -1666,12 +1669,12 @@ class GameUI(QMainWindow):
             else:
                 self.game.safety_level = 0
 
-    def menu_switch_cheat_mode(self):
-        self.game.cheat_mode = not self.game.cheat_mode
-        print(f"CHEAT_MODE: {self.game.cheat_mode}")
+    def menu_switch_edit_mode(self):
+        self.game.edit_mode = not self.game.edit_mode
+        print(f"EDIT_MODE: {self.game.edit_mode}")
         for land in self.game.mine_field.land_list:
             land.ui.update_display()
-        self.set_message(f"Cheat Mode: {"On" if self.game.cheat_mode else "Off"}")
+        self.set_message(f"Edit Mode: {"On" if self.game.edit_mode else "Off"}")
 
     @staticmethod
     def menu_about():
@@ -2200,7 +2203,6 @@ class Bot(QRunnable):
                     max_b = min(len(inter_adj), cond_b["possible_mine"])
                     cond_new = {
                         "id": "",
-                        # "land": f"{cond_a["land"]}x{cond_b["land"]}",
                         "land": f"{cond_a["land"]}",
                         "adj_land": inter_adj,
                         "possible_mine": min(max_a, max_b),
