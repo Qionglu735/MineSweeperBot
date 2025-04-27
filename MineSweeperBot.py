@@ -344,6 +344,7 @@ class MineField(object):
             land.cover = SYMBOL_BLANK
             land.checked = False
             land.focus = False
+            land.wrong_flag = False
             land.ui.update_display()
 
     def generate_mine(self, safe_x=-9, safe_y=-9):
@@ -520,7 +521,7 @@ class MineField(object):
             land.ui_setup()
 
         self.game.ui.setFixedWidth(20 + self.field_width * self.game.ui.button_size)
-        self.game.ui.setFixedHeight(106 + self.field_height * self.game.ui.button_size)
+        self.game.ui.setFixedHeight(100 + self.field_height * self.game.ui.button_size)
 
 
 class Game(object):
@@ -1247,7 +1248,7 @@ class GameUI(QMainWindow):
     button_size = BUTTON_SIZE_DEFAULT
     ui_activated = True
     ui_opacity_max = 1000
-    ui_opacity = ui_opacity_max / 3 / 2
+    ui_opacity = ui_opacity_max * 0.47
     statistic_dialog = None
 
     menu_action_dict = dict()
@@ -1323,11 +1324,11 @@ class GameUI(QMainWindow):
         game_menu = menu.addMenu("&Game")
         game_menu.addAction(
             self.create_menu_action(
-                "New &Game", "Start a new game",
+                "&New Game", "Start a new game",
                 Qt.Key.Key_R, self.menu_new_game_setup))
         game_menu.addAction(
             self.create_menu_action(
-                "Reset &Game", "Reset current game",
+                "&Reset Game", "Reset current game",
                 QKeySequence("Ctrl+R"), self.menu_new_game_reset))
         game_menu.addSeparator()
         for preset in PRESET:
@@ -1427,7 +1428,7 @@ class GameUI(QMainWindow):
         option_menu.addSeparator()
         option_menu.addAction(
             self.create_menu_action(
-                "Edit Mode", "Edit Mode",
+                "Edit Mode", "Ctrl+Click to set Mines and Lands",
                 Qt.Key.Key_T, self.menu_switch_edit_mode,
                 check_able=True, checked=False))
 
@@ -1848,9 +1849,12 @@ def main():
 
     game_exit_list = [False for _ in game_list]
     while not all(game_exit_list):
-        r = global_stat_queue.get()
-        if "exit" in r:
-            game_exit_list[r["game_id"]] = True
+        try:
+            r = global_stat_queue.get()
+            if "exit" in r:
+                game_exit_list[r["game_id"]] = True
+                continue
+        except KeyboardInterrupt:
             continue
 
         process_global_stat(global_stat, r)
