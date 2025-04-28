@@ -2582,5 +2582,8 @@ class BotStat:
             self.game.global_stat.put(r)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    if sys.platform.startswith("win"):
+        multiprocessing.freeze_support()
+
     main()
