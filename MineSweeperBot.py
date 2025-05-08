@@ -642,7 +642,7 @@ class Game(object):
         self.bot.result.game_update_completed.emit()  # --> bot
         if self.bot.auto_solving:
             self.bot_stat.record_click()
-            if self.ui is not None:
+            if self.ui is not None and self.ui.statistic_dialog is not None:
                 self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
 
     def bot_random_click(self, land):  # <-- bot
@@ -650,7 +650,7 @@ class Game(object):
         self.bot.result.game_update_completed.emit()  # --> bot
         if self.bot.auto_solving:
             self.bot_stat.record_random_click()
-            if self.ui is not None:
+            if self.ui is not None and self.ui.statistic_dialog is not None:
                 self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
 
     def bot_mark(self, land):  # <-- bot
@@ -658,7 +658,7 @@ class Game(object):
         self.bot.result.game_update_completed.emit()  # --> bot
         if self.bot.auto_solving:
             self.bot_stat.record_mark()
-            if self.ui is not None:
+            if self.ui is not None and self.ui.statistic_dialog is not None:
                 self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
 
     @staticmethod
@@ -677,7 +677,7 @@ class Game(object):
                 os.mkdir("screenshot")
             file_path = f"screenshot/{self.default_save_name()}.png"
             self.save(file_path)
-        if self.ui is not None:
+        if self.ui is not None and self.ui.statistic_dialog is not None:
             self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
         else:
             self.bot_stat.to_global_stat(file_path)
@@ -704,7 +704,8 @@ class Game(object):
         if self.bot_looper is not None and self.bot_looper.looping != 0:
             self.bot_looper.status.stop_looping.emit()  # --> bot_looper
             self.bot.result.stop_solving.emit()  # --> bot
-            self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+            if self.ui.statistic_dialog is not None:
+                self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
             while self.bot_looper.looping != 0:
                 pass
             self.ui.menu_action_dict["Solve Continuously"].setChecked(False)
@@ -1242,14 +1243,87 @@ class StatisticDialog(QDialog):
         # self.update()
 
 
+class ManualDialog(QDialog):
+
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.setWindowTitle("Manual")
+        self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "Mine.ico")))
+        self.setFixedSize(439 - 2, 448 - 32)
+
+        grid = QGridLayout()
+
+        grid_row = 1
+        for line in [
+            "### Gameplay ###",
+            "Start a new game: R",
+            "Reveal a tile: Left-Click / Space",
+            "Mark a tile: Right-Click / X",
+            "Move cursor: W / S / A / D",
+            "or ↑ / ↓ / ← / →",
+            "",
+            "### Additional Control ###",
+            "Restart current game: Ctrl + R",
+            "Save/Load game: Ctrl + S / Ctrl + L",
+            "* Drag-Drop the saved image into",
+            "minefield will load the game",
+            "",
+            "Inc./Dec. field Wd. by 1: U/I",
+            "Inc./Dec. field Wd. by 5: Shift + U/I",
+            "Inc./Dec. field Ht. by 1: J/K",
+            "Inc./Dec. field Ht. by 5: Shift + J/K",
+            "Inc./Dec. mine Qty. by 1: M/,",
+            "Inc./Dec. mine Qty. by 5: Shift + M/,",
+            "",
+        ]:
+            label = QLabel(line)
+            label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+            grid.addWidget(label, grid_row, 1)
+            grid_row += 1
+
+        grid.addWidget(QLabel("  "), 1, 2)
+
+        grid_row = 1
+        for line in [
+            "### Bot Control ###",
+            "Generate hints: F",
+            "Solve current game: B",
+            "Solve games continuously: V",
+            "Show statistic page: C",
+            "",
+            "### Edit Mode ###",
+            "Edit mode switch: T",
+            "Add/Remove mine: Ctrl + Left-Click",
+            "Recover tile: Ctrl + Right-Click",
+            "",
+            "### Settings ###",
+            "Minimize: Z",
+            "Opacity: Wheel",
+            "Zooming: Ctrl + Wheel",
+            "Exit: Esc",
+            "",
+        ]:
+            label = QLabel(line)
+            label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+            grid.addWidget(label, grid_row, 3)
+            grid_row += 1
+
+        self.setLayout(grid)
+
+
 class GameUI(QMainWindow):
     game = None
 
     button_size = BUTTON_SIZE_DEFAULT
     ui_activated = True
-    ui_opacity_max = 1000
-    ui_opacity = ui_opacity_max * 0.47
+    ui_opacity_max = 2000
+    ui_opacity = ui_opacity_max * 0.41 / 2
     statistic_dialog = None
+    manual_dialog = None
+
+    option_opacity_display = None
+    option_zooming_display = None
 
     menu_action_dict = dict()
     emote = ""
@@ -1275,8 +1349,6 @@ class GameUI(QMainWindow):
             int(QApplication.primaryScreen().size().height() * 0.73),
         )
         self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "Mine.ico")))
-
-        self.statistic_dialog = StatisticDialog(self)
 
         self.title_label = QLabel()
 
@@ -1350,7 +1422,7 @@ class GameUI(QMainWindow):
         for preset in DIFFICULTY_PRESET:
             difficulty_level_menu.addAction(
                 self.create_menu_action(
-                    f"&{preset[1]}", "{}% lands have mine".format(int(preset[0] * 100)),
+                    f"&{preset[1]}", "{}% tiles have mine".format(int(preset[0] * 100)),
                     trigger=functools.partial(self.menu_new_game_setup, percent=preset[0])))
         difficulty_menu.addAction(
             self.create_menu_action(
@@ -1428,12 +1500,24 @@ class GameUI(QMainWindow):
         option_menu.addSeparator()
         option_menu.addAction(
             self.create_menu_action(
-                "Edit Mode", "Ctrl+Click to set Mines and Lands",
+                "Edit Mode", "Place mines manually",
                 Qt.Key.Key_T, self.menu_switch_edit_mode,
                 check_able=True, checked=False))
+        option_menu.addSeparator()
+        self.option_opacity_display = self.create_menu_action(
+            "Opacity: 30%", "Wheel to change",
+            trigger=self.menu_manual)
+        self.option_zooming_display = self.create_menu_action(
+            "Zooming: 20", "Ctrl-Wheel to change",
+            trigger=self.menu_manual)
+        option_menu.addActions([self.option_opacity_display, self.option_zooming_display])
 
         # Menu: About
         about_menu = menu.addMenu("&About")
+        about_menu.addAction(
+            self.create_menu_action(
+                "&How to play...", "Show manual",
+                trigger=self.menu_manual))
         about_menu.addAction(
             self.create_menu_action(
                 "&About...", "Visit project homepage",
@@ -1644,14 +1728,17 @@ class GameUI(QMainWindow):
             self.game.stop_looper()
 
     def menu_statistic(self):
+        if self.statistic_dialog is None:
+            self.statistic_dialog = StatisticDialog(self)
         self.statistic_dialog.refresh(self.game.bot_stat.record_list)
-        self.statistic_dialog.move(self.geometry().x() - 200, self.geometry().y() - 30)
+        self.statistic_dialog.move(self.geometry().x() - 191, self.geometry().y() - 30)
         self.statistic_dialog.show()
         self.activateWindow()
 
     def menu_clear_statistic(self):
         self.game.bot_stat.clear_record()
-        self.statistic_dialog.refresh(self.game.bot_stat.record_list)
+        if self.statistic_dialog is not None:
+            self.statistic_dialog.refresh(self.game.bot_stat.record_list)
 
     def menu_safety_first(self):
         if self.menu_action_dict["Safety First"].isChecked() is True:
@@ -1676,6 +1763,13 @@ class GameUI(QMainWindow):
         for land in self.game.mine_field.land_list:
             land.ui.update_display()
         self.set_message(f"Edit Mode: {"On" if self.game.edit_mode else "Off"}")
+
+    def menu_manual(self):
+        if self.manual_dialog is None:
+            self.manual_dialog = ManualDialog(self)
+        self.manual_dialog.move(self.geometry().x() + self.geometry().width(), self.geometry().y() - 30)
+        self.manual_dialog.show()
+        self.activateWindow()
 
     @staticmethod
     def menu_about():
@@ -1785,12 +1879,14 @@ class GameUI(QMainWindow):
         modifiers = QApplication.keyboardModifiers()
         if modifiers == Qt.KeyboardModifier.ControlModifier:
             self.button_size = max(1, self.button_size + int(angle_delta / abs(angle_delta)))
+            self.option_zooming_display.setText(f"Zooming: {self.button_size}")
             self.game.mine_field.ui_setup()
             self.update_title()
             self.update_time_label()
         else:
             self.ui_opacity = max(2, min(self.ui_opacity + int(angle_delta / 5), self.ui_opacity_max))
             self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
+            self.option_opacity_display.setText(f"Opacity: {int(self.ui_opacity / self.ui_opacity_max * 100):2d}%")
 
     def closeEvent(self, event):
         self.game.stop_looper()
@@ -1809,10 +1905,12 @@ class GameUI(QMainWindow):
                 self.ui_activated = True
                 self.ui_opacity = min(self.ui_opacity * 2, self.ui_opacity_max)
                 self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
+                self.option_opacity_display.setText(f"Opacity: {int(self.ui_opacity / self.ui_opacity_max * 100):2d}%")
             elif event.type() == QEvent.Type.WindowDeactivate:
                 self.ui_activated = False
                 self.ui_opacity = max(1, self.ui_opacity / 2)
                 self.setWindowOpacity(self.ui_opacity / self.ui_opacity_max)
+                self.option_opacity_display.setText(f"Opacity: {int(self.ui_opacity / self.ui_opacity_max * 100):2d}%")
             return super().event(event)
         else:
             # print(event, event.__dir__(), event.__dict__)
@@ -1823,7 +1921,7 @@ class GameUI(QMainWindow):
         self.game.bot.result.game_update_completed.emit()  # --> bot
 
 
-PROCESS_COUNT = 10
+PROCESS_COUNT = 8
 LOOP_COUNT = 1000 * 1000 * 30
 
 
@@ -1909,21 +2007,21 @@ def process_global_stat(global_stat, r):
     avg_time = 0
     if win > 0:
         avg_time = total_time / win
-    print(
-        f"[stat {preset_id}]",
-        f"Game: {r["game_id"]:2d}, "
-        f"No.{no}: {"WIN" if r["win"] else "LOSE"}, "
-        f"Minefield: {PRESET[preset_id][0]}x{PRESET[preset_id][1]}/{PRESET[preset_id][2]}, "
-        f"Click/Mark: {r["click"]}/{r["mark"]}, "
-        f"Guess: {r["random_click"]}, "
-        f"Usage time: {r["usage_time"]:.6f}, "
-        f"Total Click/Mark/Guess: {click}/{mark}/{guess}, "
-        f"Total Win/Lose: {win}/{lose}, "
-        f"Win Rate: {win_rate * 100:.2f}%, "
-        f"Guess Accuracy: {guess_suc_rate * 100:.2f}%, "
-        f"Avg. Usage Time: {avg_time:.6f}, "
-        f"Save File: {r["save_file"]}"
-    )
+    log_line = ", ".join([
+        f"[stat {preset_id}] Game: {r["game_id"]}",
+        f"No.{no}: {" WIN" if r["win"] else "LOSE"}",
+        f"Minefield: {PRESET[preset_id][0]}x{PRESET[preset_id][1]}/{PRESET[preset_id][2]}",
+        f"Click/Mark: {r["click"]}/{r["mark"]}",
+        f"Guess: {r["random_click"]}",
+        f"Usage time: {r["usage_time"]:.6f}",
+        f"Total Click/Mark/Guess: {click}/{mark}/{guess}",
+        f"Total Win/Lose: {win}/{lose}",
+        f"Win Rate: {win_rate * 100:.2f}%",
+        f"Guess Accuracy: {guess_suc_rate * 100:.2f}%",
+        f"Avg. Usage Time: {avg_time:.6f}",
+        f"Save File: {r["save_file"]}",
+    ])
+    print(log_line)
 
 
 class Bot(QRunnable):
