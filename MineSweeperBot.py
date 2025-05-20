@@ -345,7 +345,8 @@ class MineField(object):
             land.checked = False
             land.focus = False
             land.wrong_flag = False
-            land.ui.update_display()
+            if land.ui is not None:
+                land.ui.update_display()
 
     def generate_mine(self, safe_x=-9, safe_y=-9):
         for x in range(self.field_width):
@@ -407,14 +408,11 @@ class MineField(object):
     def set_focus(self, _id):
         land = self.get_focus()
         land.focus = False
-        if land.ui is not None:
-            land.ui.update_display()
         for land in self.land_list:
             if land.id == _id:
                 land.focus = True
-                if land.ui is not None:
-                    land.ui.update_display()
-                break
+            if land.ui is not None:
+                land.ui.update_display()
 
     def revealed_land_count(self):
         return len([x for x in self.land_list if x.checked])
@@ -670,6 +668,8 @@ class Game(object):
         self.bot_stat.record_game_result(self.result)
         file_path = None
         if self.terminated and self.result == "LOSE":
+            data_after_solve = self.mine_field.save()
+
             _id = self.mine_field.get_focus().id
             self.mine_field.load(self.bot.data_before_solve)
             self.mine_field.set_focus(_id)
@@ -677,6 +677,10 @@ class Game(object):
                 os.mkdir("screenshot")
             file_path = f"screenshot/{self.default_save_name()}.png"
             self.save(file_path)
+
+            self.mine_field.load(data_after_solve)
+            if self.mine_field.ui is not None:
+                self.mine_field.ui_setup()
         if self.ui is not None and self.ui.statistic_dialog is not None:
             self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
         else:
