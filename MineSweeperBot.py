@@ -1959,7 +1959,8 @@ def main():
         except KeyboardInterrupt:
             continue
 
-        process_global_stat(global_stat, r)
+        if ui == "off":
+            process_global_stat(global_stat, r)
 
     for game in game_list:
         game.join()
@@ -2055,6 +2056,7 @@ class Bot(QRunnable):
     # global_condition = None
     condition_id_list = list()
     random_choice_list = list()
+    iter_result_save = None
     result = None
 
     data_before_solve = None
@@ -2231,6 +2233,44 @@ class Bot(QRunnable):
             self.result.random_click.emit(land_list[x])
         return True
 
+    def iter_mine_position(self):
+        if self.iter_result_save is not None:
+            return self.iter_result_save
+
+        adj_condition_dict = dict()
+        adj_land_list = list()
+        for condition in self.condition_list:
+            if condition["final_cal"] == "":
+                adj_condition_dict[condition["land"]] = {
+                    "land": condition["land"],
+                    "adj_land": condition["adj_land"],
+                    "mine_count": condition["possible_mine"],
+                    "mine_count_test": 0,
+                }
+                for land in condition["adj_land"]:
+                    if land not in adj_land_list:
+                        adj_land_list.append(land)
+        adj_land_list.sort()
+        iter_result_list = list()
+        mine_count_iter_max = min(self.game.mine_field.mine_count - self.game.mine_field.marked_land_count(), 8)
+        print(len(adj_land_list), mine_count_iter_max, math.comb(len(adj_land_list), mine_count_iter_max))
+        counter = 0
+        if math.comb(len(adj_land_list), mine_count_iter_max) < 100000:
+            for mine_count in range(1, mine_count_iter_max + 1):
+                for indices in itertools.combinations(range(len(adj_land_list)), mine_count):
+                    counter += 1
+                    for land, condition in adj_condition_dict.items():
+                        adj_condition_dict[land]["mine_count_test"] = 0
+                    for i in indices:
+                        for land, condition in adj_condition_dict.items():
+                            if adj_land_list[i] in condition["adj_land"]:
+                                adj_condition_dict[land]["mine_count_test"] += 1
+                    if all([x["mine_count"] == x["mine_count_test"] for x in adj_condition_dict.values()]):
+                        iter_result_list.append([adj_land_list[i] for i in indices])
+            print("iter_result:", len(iter_result_list), "/", counter)
+        self.iter_result_save = iter_result_list, adj_land_list
+        return iter_result_list, adj_land_list
+
     def analyse_condition(self, return_instantly=False):
         global_condition_added = False
         confirm_result_dict = dict()
@@ -2352,6 +2392,19 @@ class Bot(QRunnable):
         # for cond in self.condition_list:
         #     print(cond)
         # print("condition_list len:", len(self.condition_list))
+
+        if len(confirm_result_dict.keys()) == 0:
+            iter_result_list, adj_land_list = self.iter_mine_position()
+
+            if len(iter_result_list) > 0:
+                iter_result_union = set()
+                for i in iter_result_list:
+                    iter_result_union |= set(i)
+                if len(iter_result_union) < len(adj_land_list):
+                    for land in set(adj_land_list) - iter_result_union:
+                        confirm_result_dict[land] = False
+                    self.iter_result_save = None
+
         return confirm_result_dict
 
     def analyse_possibility(self) -> (list, list, dict, ):
@@ -2361,11 +2414,12 @@ class Bot(QRunnable):
         cover_mine_count = mine_field.mine_count - mine_field.marked_land_count()
         avg_mine_rate = cover_mine_count / cover_land_count
         max_mine_rate, min_mine_rate = avg_mine_rate, avg_mine_rate
-        all_adj_land_list = dict()
+
+        all_adj_land_dict, none_adj_land_dict = dict(), dict()
         for condition in self.condition_list:
             for land in condition["adj_land"]:
-                if land not in all_adj_land_list:
-                    all_adj_land_list[land] = {
+                if land not in all_adj_land_dict:
+                    all_adj_land_dict[land] = {
                         "id": land,
                         "mine_rate": avg_mine_rate,
 
@@ -2376,60 +2430,75 @@ class Bot(QRunnable):
                         "mine_rate_v3": avg_mine_rate,
                         "mine_rate_v3_history": [(avg_mine_rate, "None", )],
                     }
-        none_adj_land_list = dict()
+        iter_result_list, adj_land_list = self.iter_mine_position()
+        self.iter_result_save = None
+
+        none_adj_mine_rate = avg_mine_rate
+        adj_mine_rate = avg_mine_rate
+        if len(iter_result_list) > 0 and len(all_adj_land_dict.keys()) < cover_land_count:
+            if min([len(x) for x in iter_result_list]) == max([len(x) for x in iter_result_list]):
+                none_adj_mine_rate = (cover_mine_count - len(iter_result_list[0])) / (cover_land_count - len(adj_land_list))
+                adj_mine_rate = len(iter_result_list[0]) / len(adj_land_list)
+                print(none_adj_mine_rate, adj_mine_rate)
+
         for land in mine_field.land_list:
-            if not land.checked and land.cover == SYMBOL_BLANK and land.id not in all_adj_land_list:
-                none_adj_land_list[land.id] = {
-                    "id": land,
-                    "mine_rate": avg_mine_rate,
-                }
+            if not land.checked and land.cover == SYMBOL_BLANK:
+                if land.id in all_adj_land_dict:
+                    if all_adj_land_dict[land.id]["mine_rate_v3"] == avg_mine_rate:
+                        all_adj_land_dict[land.id]["mine_rate_v3"] = adj_mine_rate
+                else:
+                    none_adj_land_dict[land.id] = {
+                        "id": land,
+                        # "mine_rate": avg_mine_rate,
+                        "mine_rate": none_adj_mine_rate,
+                    }
         for condition in self.condition_list:
             # print(condition)
             cond_mine_rate = condition["possible_mine"] / len(condition["adj_land"])
             for land in condition["adj_land"]:
                 # # version_1
                 # if cond_mine_rate >= 0.5:
-                #     if cond_mine_rate > all_adj_land_list[land]["mine_rate_v1"]:
-                #         all_adj_land_list[land]["mine_rate_v1"] = cond_mine_rate
-                #         all_adj_land_list[land]["mine_rate_v1_history"].append((cond_mine_rate, condition["id"], ))
+                #     if cond_mine_rate > all_adj_land_dict[land]["mine_rate_v1"]:
+                #         all_adj_land_dict[land]["mine_rate_v1"] = cond_mine_rate
+                #         all_adj_land_dict[land]["mine_rate_v1_history"].append((cond_mine_rate, condition["id"], ))
                 # else:
-                #     if all_adj_land_list[land]["mine_rate_v1"] >= 0.5:
+                #     if all_adj_land_dict[land]["mine_rate_v1"] >= 0.5:
                 #         pass
                 #     elif abs(cond_mine_rate - avg_mine_rate) \
-                #             > abs(all_adj_land_list[land]["mine_rate_v1"] - avg_mine_rate):
-                #         all_adj_land_list[land]["mine_rate_v1"] = cond_mine_rate
-                #         all_adj_land_list[land]["mine_rate_v1_history"].append((cond_mine_rate, condition["id"], ))
+                #             > abs(all_adj_land_dict[land]["mine_rate_v1"] - avg_mine_rate):
+                #         all_adj_land_dict[land]["mine_rate_v1"] = cond_mine_rate
+                #         all_adj_land_dict[land]["mine_rate_v1_history"].append((cond_mine_rate, condition["id"], ))
 
                 # # version_2
-                # if abs(cond_mine_rate - avg_mine_rate) > abs(all_adj_land_list[land]["mine_rate_v2"] - avg_mine_rate):
-                #     all_adj_land_list[land]["mine_rate_v2"] = cond_mine_rate
-                #     all_adj_land_list[land]["mine_rate_v2_history"].append((cond_mine_rate, condition["id"], ))
+                # if abs(cond_mine_rate - avg_mine_rate) > abs(all_adj_land_dict[land]["mine_rate_v2"] - avg_mine_rate):
+                #     all_adj_land_dict[land]["mine_rate_v2"] = cond_mine_rate
+                #     all_adj_land_dict[land]["mine_rate_v2_history"].append((cond_mine_rate, condition["id"], ))
 
                 # version_3
                 confirm_rate = 0.7
-                if avg_mine_rate >= confirm_rate or cond_mine_rate >= confirm_rate:
-                    if cond_mine_rate > all_adj_land_list[land]["mine_rate_v3"]:
-                        all_adj_land_list[land]["mine_rate_v3"] = cond_mine_rate
-                        all_adj_land_list[land]["mine_rate_v3_history"].append((cond_mine_rate, condition["id"],))
+                if adj_mine_rate >= confirm_rate or cond_mine_rate >= confirm_rate:
+                    if cond_mine_rate > all_adj_land_dict[land]["mine_rate_v3"]:
+                        all_adj_land_dict[land]["mine_rate_v3"] = cond_mine_rate
+                        all_adj_land_dict[land]["mine_rate_v3_history"].append((cond_mine_rate, condition["id"],))
                 else:
-                    cond_confident = abs(cond_mine_rate - avg_mine_rate)
-                    if cond_mine_rate < avg_mine_rate:
-                        cond_confident /= avg_mine_rate
+                    cond_confident = abs(cond_mine_rate - adj_mine_rate)
+                    if cond_mine_rate < adj_mine_rate:
+                        cond_confident /= adj_mine_rate
                     else:
-                        cond_confident /= confirm_rate - avg_mine_rate
-                    record_confident = abs(all_adj_land_list[land]["mine_rate_v3"] - avg_mine_rate)
-                    if all_adj_land_list[land]["mine_rate_v3"] < avg_mine_rate:
-                        record_confident /= avg_mine_rate
+                        cond_confident /= confirm_rate - adj_mine_rate
+                    record_confident = abs(all_adj_land_dict[land]["mine_rate_v3"] - adj_mine_rate)
+                    if all_adj_land_dict[land]["mine_rate_v3"] < adj_mine_rate:
+                        record_confident /= adj_mine_rate
                     else:
-                        record_confident /= confirm_rate - avg_mine_rate
+                        record_confident /= confirm_rate - adj_mine_rate
                     if cond_confident > record_confident:
-                        all_adj_land_list[land]["mine_rate_v3"] = cond_mine_rate
-                        all_adj_land_list[land]["mine_rate_v3_history"].append((cond_mine_rate, condition["id"], ))
+                        all_adj_land_dict[land]["mine_rate_v3"] = cond_mine_rate
+                        all_adj_land_dict[land]["mine_rate_v3_history"].append((cond_mine_rate, condition["id"], ))
 
                 # version selection
-                all_adj_land_list[land]["mine_rate"] = all_adj_land_list[land]["mine_rate_v3"]
+                all_adj_land_dict[land]["mine_rate"] = all_adj_land_dict[land]["mine_rate_v3"]
 
-        for _, land in all_adj_land_list.items():
+        for _, land in itertools.chain(all_adj_land_dict.items(), none_adj_land_dict.items()):
             # if not (land["mine_rate_v1"] == land["mine_rate_v2"] == land["mine_rate_v3"]):
             #     print("::::", land["id"], self.game.mine_field.land(land["id"]).content == SYMBOL_MINE)
             #     print("v1", land["mine_rate_v1"], land["mine_rate_v1_history"])
@@ -2438,7 +2507,7 @@ class Bot(QRunnable):
             max_mine_rate = max(max_mine_rate, land["mine_rate"])
             min_mine_rate = min(min_mine_rate, land["mine_rate"])
         high_mine_rate_list, high_safe_rate_list, rate_dict = list(), list(), dict()
-        for _id, land in all_adj_land_list.items():
+        for _id, land in itertools.chain(all_adj_land_dict.items(), none_adj_land_dict.items()):
             cover = "{:.2f}" \
                 .format(land["mine_rate"]) \
                 .replace("0.", ".") \
@@ -2456,27 +2525,27 @@ class Bot(QRunnable):
             else:
                 if self.game.ui is not None and self.game.ui.ui_activated:
                     self.result.custom_cover_ui.emit(mine_field.land(_id), cover, "#909090")
-        avg_cover = "{:.2f}" \
-            .format(avg_mine_rate) \
-            .replace("0.", ".") \
-            .replace("1.00", "1.0")
-        for land in mine_field.land_list:
-            if land.checked or land.cover != SYMBOL_BLANK or land.id in all_adj_land_list:
-                continue
-        for _id, land in none_adj_land_list.items():
-            if max_mine_rate == avg_mine_rate:
-                if self.game.ui is not None and self.game.ui.ui_activated:
-                    self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#e08080")
-                high_mine_rate_list.append(_id)
-                rate_dict[_id] = avg_mine_rate
-            elif min_mine_rate == avg_mine_rate:
-                if self.game.ui is not None and self.game.ui.ui_activated:
-                    self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#80e080")
-                high_safe_rate_list.append(_id)
-                rate_dict[_id] = avg_mine_rate
-            else:
-                if self.game.ui is not None and self.game.ui.ui_activated:
-                    self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#909090")
+        # avg_cover = "{:.2f}" \
+        #     .format(avg_mine_rate) \
+        #     .replace("0.", ".") \
+        #     .replace("1.00", "1.0")
+        # for land in mine_field.land_list:
+        #     if land.checked or land.cover != SYMBOL_BLANK or land.id in all_adj_land_dict:
+        #         continue
+        # for _id, land in none_adj_land_dict.items():
+        #     if max_mine_rate == avg_mine_rate:
+        #         if self.game.ui is not None and self.game.ui.ui_activated:
+        #             self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#e08080")
+        #         high_mine_rate_list.append(_id)
+        #         rate_dict[_id] = avg_mine_rate
+        #     elif min_mine_rate == avg_mine_rate:
+        #         if self.game.ui is not None and self.game.ui.ui_activated:
+        #             self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#80e080")
+        #         high_safe_rate_list.append(_id)
+        #         rate_dict[_id] = avg_mine_rate
+        #     else:
+        #         if self.game.ui is not None and self.game.ui.ui_activated:
+        #             self.result.custom_cover_ui.emit(mine_field.land(_id), avg_cover, "#909090")
 
         # print(f"[bot {self.game.id}] "
         #       f"cond_list: {len(self.condition_list)}, "
