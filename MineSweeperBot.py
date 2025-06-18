@@ -14,6 +14,7 @@ import itertools
 import json
 import math
 import multiprocessing
+import operator
 import os
 import sys
 import time
@@ -320,6 +321,7 @@ class MineField(object):
     mine_count = 0
 
     land_list = None
+    land_list_copy = None
 
     ui = None
 
@@ -327,11 +329,26 @@ class MineField(object):
         self.game = game
         self.init_mine_field()
 
-    def init_mine_field(self):
+    def init_mine_field(self, keep_ui=False):
         self.field_width = min(max(MIN_WIDTH, self.field_width), MAX_WIDTH)
         self.field_height = min(max(MIN_HEIGHT, self.field_height), MAX_HEIGHT)
         self.mine_count = min(max(1, self.mine_count), (self.field_width - 1) * (self.field_height - 1))
 
+        if self.land_list_copy is not None:
+            if self.ui is not None:
+                for land in self.land_list_copy:
+                    if land.ui is not None:
+                        self.ui.remove_land(land.ui)
+            self.land_list_copy.clear()
+        if self.land_list is not None:
+            if keep_ui:
+                self.land_list_copy = self.land_list[:]
+            else:
+                if self.ui is not None:
+                    for land in self.land_list:
+                        if land.ui is not None:
+                            self.ui.remove_land(land.ui)
+            self.land_list.clear()
         self.land_list = list()
         for y in range(self.field_height):
             for x in range(self.field_width):
@@ -398,6 +415,25 @@ class MineField(object):
             x = max(0, min(x, self.field_width - 1))
             y = max(0, min(y, self.field_height - 1))
             return self.land_list[x + y * self.field_width]
+        else:
+            return None
+
+    def land_is_neighbor(self, a_id, b_id):
+        a, b = self.land(a_id), self.land(b_id)
+        for _x, _y in itertools.product([-1, 0, 1], [-1, 0, 1]):
+            if a.x + _x == b.x and a.y + _y == b.y:
+                return True
+        return False
+
+    def land_get_neighbor(self, _id):
+        land = self.land(_id)
+        res_id = list()
+        for _x, _y in itertools.product([-1, 0, 1], [-1, 0, 1]):
+            if _x == 0 and _y == 0:
+                continue
+            if 0 <= (land.x + _x) < self.field_width and 0 <= (land.y + _y) < self.field_height:
+                res_id.append(self.land(x=land.x + _x, y=land.y + _y).id)
+        return res_id
 
     def get_focus(self):
         for land in self.land_list:
@@ -419,6 +455,12 @@ class MineField(object):
 
     def marked_land_count(self):
         return len([x for x in self.land_list if not x.checked and x.cover == SYMBOL_FLAG])
+
+    def cover_land_count(self):
+        return self.field_width * self.field_height - self.revealed_land_count() - self.marked_land_count()
+
+    def cover_mine_count(self):
+        return self.mine_count - self.marked_land_count()
 
     def row_mark_count(self, _id):
         land = self.land(_id)
@@ -497,14 +539,14 @@ class MineField(object):
             res["land_list"].append(land.save())
         return res
 
-    def load(self, data):
+    def load(self, data, data_only=False):
         for key in [
             "field_width",
             "field_height",
             "mine_count",
         ]:
             setattr(self, key, data[key])
-        self.init_mine_field()
+        self.init_mine_field(keep_ui=data_only)
         for i, land in enumerate(data["land_list"]):
             self.land_list[i].load(land)
 
@@ -514,8 +556,9 @@ class MineField(object):
     def ui_setup(self):
         self.ui.init_grid()
         for land in self.land_list:
-            land.ui_init(self.ui)
-            self.ui.add_land(land.ui, land.y, land.x)
+            if land.ui is None:
+                land.ui_init(self.ui)
+                self.ui.add_land(land.ui, land.y, land.x)
             land.ui_setup()
 
         self.game.ui.setFixedWidth(20 + self.field_width * self.game.ui.button_size)
@@ -582,6 +625,8 @@ class Game(object):
         if self.ui is not None:
             self.ui_setup()
 
+        # self.write_log(f"new_game")
+
         if self.bot_looper is not None and self.bot_looper.looping:
             self.bot_looper.status.map_ready.emit()  # --> bot_looper
 
@@ -590,6 +635,13 @@ class Game(object):
         self.start_time = None
         self.end_time = None
         self.result = None
+
+    @staticmethod
+    def default_save_folder():
+        now = datetime.datetime.now()
+        folder_name = f"screenshot/{now.strftime("%Y_%m_%d_%H")}"
+        os.makedirs(folder_name, exist_ok=True)
+        return folder_name
 
     def default_save_name(self):
         now = datetime.datetime.now()
@@ -636,55 +688,56 @@ class Game(object):
         self.bot_pool.start(self.bot)
 
     def bot_click(self, land):  # <-- bot
+        # self.write_log(f"bot_click {land.x}, {land.y}")
         land.auto_click()
-        self.bot.result.game_update_completed.emit()  # --> bot
         if self.bot.auto_solving:
             self.bot_stat.record_click()
             if self.ui is not None and self.ui.statistic_dialog is not None:
                 self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+        self.bot.result.game_update_completed.emit()  # --> bot
 
     def bot_random_click(self, land):  # <-- bot
         land.auto_click()
-        self.bot.result.game_update_completed.emit()  # --> bot
         if self.bot.auto_solving:
             self.bot_stat.record_random_click()
             if self.ui is not None and self.ui.statistic_dialog is not None:
                 self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+        self.bot.result.game_update_completed.emit()  # --> bot
 
     def bot_mark(self, land):  # <-- bot
         land.auto_mark()
-        self.bot.result.game_update_completed.emit()  # --> bot
         if self.bot.auto_solving:
             self.bot_stat.record_mark()
             if self.ui is not None and self.ui.statistic_dialog is not None:
                 self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
+        self.bot.result.game_update_completed.emit()  # --> bot
 
     @staticmethod
     def bot_custom_cover_ui(land, custom_cover, custom_color):
         land.ui.update_display(custom_cover=custom_cover, custom_color=custom_color)
 
     def bot_finished(self):  # <-- bot
-        self.bot_looper.status.bot_finished.emit()  # --> bot_looper
+        # self.write_log(f"bot_finish: {self.result}")
         self.bot_stat.record_game_result(self.result)
         file_path = None
         if self.terminated and self.result == "LOSE":
             data_after_solve = self.mine_field.save()
-
             _id = self.mine_field.get_focus().id
-            self.mine_field.load(self.bot.data_before_solve)
+
+            self.mine_field.load(self.bot.data_before_solve, data_only=True)
             self.mine_field.set_focus(_id)
-            if not os.path.isdir("screenshot"):
-                os.mkdir("screenshot")
-            file_path = f"screenshot/{self.default_save_name()}.png"
+            file_path = f"{self.default_save_folder()}/{self.default_save_name()}.png"
             self.save(file_path)
 
-            self.mine_field.load(data_after_solve)
             if self.mine_field.ui is not None:
+                self.mine_field.load(data_after_solve)
                 self.mine_field.ui_setup()
         if self.ui is not None and self.ui.statistic_dialog is not None:
             self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
         else:
             self.bot_stat.to_global_stat(file_path)
+
+        self.bot_looper.status.bot_finished.emit()  # --> bot_looper
 
     def start_looper(self, loop_times=-1):
         self.bot.auto_click = True
@@ -711,7 +764,7 @@ class Game(object):
             if self.ui.statistic_dialog is not None:
                 self.ui.statistic_dialog.refresh(self.bot_stat.record_list)
             while self.bot_looper.looping != 0:
-                pass
+                time.sleep(0.001)
             self.ui.menu_action_dict["Solve Continuously"].setChecked(False)
 
     def looper_exited(self):
@@ -734,6 +787,10 @@ class Game(object):
         self.ui.adjustSize()
         self.ui.set_emote("")
         self.ui.set_message("New Game Ready")
+
+    def write_log(self, msg):
+        with open(f"log.txt", "a") as f:
+            f.write(f"[{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")}] [{self.id:2d}] {msg}\n")
 
 
 class LandUI(QPushButton):
@@ -863,6 +920,14 @@ class MineFieldUI(QWidget):
         land_ui.customContextMenuRequested.connect(self.right_click)
         grid = self.layout()
         grid.addWidget(land_ui, y, x)
+
+    def remove_land(self, land_ui):
+        grid = self.layout()
+        grid.removeWidget(land_ui)
+        land_ui.clicked.disconnect(self.left_click)
+        land_ui.customContextMenuRequested.disconnect(self.right_click)
+        land_ui.deleteLater()
+        land_ui.setParent(None)
 
     def left_click(self):
         self.sender().left_click()
@@ -1716,12 +1781,15 @@ class GameUI(QMainWindow):
     def menu_bot_solve(self):
         self.game.stop_looper()
         if not self.game.terminated:
-            self.game.bot.auto_click = True
-            self.menu_action_dict["Auto Click"].setChecked(True)
-            self.game.bot.auto_mark = True
-            self.menu_action_dict["Auto Mark"].setChecked(True)
-            self.game.bot_stat.create_record()
-            self.game.start_bot()
+            if self.game.bot.auto_solving:
+                self.game.bot.result.stop_solving.emit()
+            else:
+                self.game.bot.auto_click = True
+                self.menu_action_dict["Auto Click"].setChecked(True)
+                self.game.bot.auto_mark = True
+                self.menu_action_dict["Auto Mark"].setChecked(True)
+                self.game.bot_stat.create_record()
+                self.game.start_bot()
 
     def menu_bot_solve_looping(self):
         if self.game.bot_looper.looping == 0:
@@ -1925,7 +1993,7 @@ class GameUI(QMainWindow):
         self.game.bot.result.game_update_completed.emit()  # --> bot
 
 
-PROCESS_COUNT = 8
+PROCESS_COUNT = 30
 LOOP_COUNT = 1000 * 1000 * 30
 
 
@@ -1941,6 +2009,8 @@ def main():
     global_stat = dict()
     for i in range(len(PRESET)):
         global_stat[i % len(PRESET)] = list()
+
+    start_time = datetime.datetime.now()
 
     global_stat_queue = multiprocessing.Queue()
     game_list = list()
@@ -1960,7 +2030,7 @@ def main():
             continue
 
         if ui == "off":
-            process_global_stat(global_stat, r)
+            process_global_stat(global_stat, start_time, r)
 
     for game in game_list:
         game.join()
@@ -1992,7 +2062,7 @@ def create_new_game(index, global_stat, ui):
     })
 
 
-def process_global_stat(global_stat, r):
+def process_global_stat(global_stat, start_time, r):
     preset_id = r["game_id"] % len(PRESET)
     global_stat[preset_id].append(r)
 
@@ -2013,9 +2083,11 @@ def process_global_stat(global_stat, r):
     if win > 0:
         avg_time = total_time / win
     log_line = ", ".join([
-        f"[stat {preset_id}] Game: {r["game_id"]}",
+        f"Game/s: {sum([len(x) for x in global_stat.values()])
+                          / (datetime.datetime.now() - start_time).seconds:.2f}",
+        f"[stat {preset_id}] Game: {r["game_id"]:2d}",
         f"No.{no}: {" WIN" if r["win"] else "LOSE"}",
-        f"Minefield: {PRESET[preset_id][0]}x{PRESET[preset_id][1]}/{PRESET[preset_id][2]}",
+        f"Minefield: {PRESET[preset_id][0]:2d}x{PRESET[preset_id][1]:2d}/{PRESET[preset_id][2]:2d}",
         f"Click/Mark: {r["click"]}/{r["mark"]}",
         f"Guess: {r["random_click"]}",
         f"Usage time: {r["usage_time"]:.6f}",
@@ -2099,7 +2171,7 @@ class Bot(QRunnable):
                 self.auto_step -= 1
             while self.auto_solving and self.auto_step != 0 and self.game_updating:
                 # wait until game update completed
-                pass
+                time.sleep(0.001)
         self.auto_solving = False
         self.result.bot_finished.emit()
 
@@ -2115,6 +2187,7 @@ class Bot(QRunnable):
                 self.result.emote.emit(":(")
                 self.result.message.emit(f"No conclusion found")
                 return False
+
         confirm_result_dict = self.analyse_condition(return_instantly=True if self.auto_step == -1 else False)
         if len(confirm_result_dict.keys()) > 0:
             for land_id, have_mine in confirm_result_dict.items():
@@ -2122,6 +2195,7 @@ class Bot(QRunnable):
                 if not have_mine:
                     if self.auto_click:
                         self.result.click.emit(land)
+                        break
                     else:
                         print(f"[Bot] ({land.x}, {land.y}) {land.id} is empty")
                         self.result.message.emit(f"({land.x + 1}, {land.y + 1}) is empty")
@@ -2129,6 +2203,7 @@ class Bot(QRunnable):
                 else:
                     if self.auto_mark:
                         self.result.mark.emit(land)
+                        break
                     else:
                         print(f"[Bot] ({land.x}, {land.y}) {land.id} have mine")
                         self.result.message.emit(f"({land.x + 1}, {land.y + 1}) have mine")
@@ -2139,20 +2214,19 @@ class Bot(QRunnable):
                     for cond in self.condition_list:
                         print(cond)
             return True
+
+        self.result.emote.emit(":(")
+        possible_mine_list, possible_safe_list, possibility_dict = self.analyse_possibility()
+        self.analyse_mark_count(possible_mine_list, possible_safe_list, possibility_dict)
+
+        if self.random_step == -1 or self.random_step > 0:
+            if self.random_step > 0:
+                self.random_step -= 1
+            return self.random_click()
         else:
-            self.result.emote.emit(":(")
-            possible_mine_list, possible_safe_list, possibility_dict = self.analyse_possibility()
-            self.analyse_mark_count(possible_mine_list, possible_safe_list, possibility_dict)
-
-            if self.random_step == -1 or self.random_step > 0:
-                if self.random_step > 0:
-                    self.random_step -= 1
-
-                return self.random_click()
-            else:
-                print("[Bot] No conclusion found.")
-                self.result.message.emit(f"No conclusion found")
-                return False
+            print("[Bot] No conclusion found.")
+            self.result.message.emit(f"No conclusion found")
+            return False
 
     @staticmethod
     def generate_cond_id(cond):
@@ -2251,25 +2325,94 @@ class Bot(QRunnable):
                     if land not in adj_land_list:
                         adj_land_list.append(land)
         adj_land_list.sort()
+
+        adj_land_group_list = list()
+        checked_land_list = list()
+
+        for land in adj_land_list:
+            if land in checked_land_list:
+                continue
+            temp_group_list = [land]
+            checked_land_list.append(land)
+            i = 0
+            while i < len(temp_group_list):
+                for _adj_land in self.game.mine_field.land_get_neighbor(temp_group_list[i]):
+                    if _adj_land in adj_land_list and _adj_land not in temp_group_list:
+                        temp_group_list.append(_adj_land)
+                        checked_land_list.append(_adj_land)
+                    elif _adj_land in adj_condition_dict:
+                        for __adj_land in adj_condition_dict[_adj_land]["adj_land"]:
+                            if __adj_land not in checked_land_list:
+                                temp_group_list.append(__adj_land)
+                                checked_land_list.append(__adj_land)
+                i += 1
+
+            adj_land_group_list.append(temp_group_list)
+
+        # print(adj_land_group_list)
+        adj_land_group_list = sorted(adj_land_group_list, key=lambda x: len(x))
+        # for i in adj_land_group_list:
+        #     print(i)
+
         iter_result_list = list()
-        mine_count_iter_max = min(self.game.mine_field.mine_count - self.game.mine_field.marked_land_count(), 8)
-        print(len(adj_land_list), mine_count_iter_max, math.comb(len(adj_land_list), mine_count_iter_max))
-        counter = 0
-        if math.comb(len(adj_land_list), mine_count_iter_max) < 100000:
-            for mine_count in range(1, mine_count_iter_max + 1):
-                for indices in itertools.combinations(range(len(adj_land_list)), mine_count):
-                    counter += 1
-                    for land, condition in adj_condition_dict.items():
-                        adj_condition_dict[land]["mine_count_test"] = 0
-                    for i in indices:
+        mine_count_total = self.game.mine_field.mine_count - self.game.mine_field.marked_land_count()
+        mine_count_current = mine_count_total
+        for adj_land_group in adj_land_group_list:
+            mine_count_iter_max = min(mine_count_current, len(adj_land_group), 8)
+            counter = 0
+            comb_count = math.comb(len(adj_land_group), mine_count_iter_max)
+            # print("iter:", len(adj_land_group), mine_count_iter_max, comb_count)
+            # print(adj_land_group)
+            if comb_count < 30 * 1000:
+                adj_condition_group_list = list()
+                for land in adj_land_group:
+                    for neighbor_land in self.game.mine_field.land_get_neighbor(land):
+                        if neighbor_land in adj_condition_dict and neighbor_land not in adj_condition_group_list:
+                            adj_condition_group_list.append(neighbor_land)
+                # print("adj_cond_group_list", adj_condition_group_list)
+                iter_result_group_list = list()
+                for mine_count in range(1, mine_count_iter_max + 1):
+                    for indices in itertools.combinations(range(len(adj_land_group)), mine_count):
+                        counter += 1
                         for land, condition in adj_condition_dict.items():
-                            if adj_land_list[i] in condition["adj_land"]:
-                                adj_condition_dict[land]["mine_count_test"] += 1
-                    if all([x["mine_count"] == x["mine_count_test"] for x in adj_condition_dict.values()]):
-                        iter_result_list.append([adj_land_list[i] for i in indices])
-            print("iter_result:", len(iter_result_list), "/", counter)
-        self.iter_result_save = iter_result_list, adj_land_list
-        return iter_result_list, adj_land_list
+                            adj_condition_dict[land]["mine_count_test"] = 0
+                        for i in indices:
+                            for neighbor_land in self.game.mine_field.land_get_neighbor(adj_land_group[i]):
+                                if neighbor_land in adj_condition_dict:
+                                    adj_condition_dict[neighbor_land]["mine_count_test"] += 1
+                                    # adj_condition_group_list.append(land)
+                        if all([adj_condition_dict[land]["mine_count"] == adj_condition_dict[land]["mine_count_test"] for land in adj_condition_group_list]):
+                            iter_result_group_list.append([adj_land_group[i] for i in indices])
+
+                # print("iter_result:", len(iter_result_group_list), "/", counter)
+                # for i in iter_result_group_list:
+                #     print(i)
+                if len(iter_result_group_list) > 0:
+                    iter_result_list.append(iter_result_group_list)
+                    mine_count_current -= min([len(x) for x in iter_result_group_list])
+            else:
+                # print("comb too large:", comb_count)
+                iter_result_list = list()
+                break
+
+        res = list()
+        if len(iter_result_list) > 0:
+            product_count = functools.reduce(operator.mul, [len(x) for x in iter_result_list], 1)
+            if product_count < 30 * 1000:
+                # print("product count:", product_count)
+                for _group in itertools.product(*iter_result_list):
+                    # print(_group)
+                    res.append([_item for _list in _group for _item in _list])
+            else:
+                # print("product too large:", product_count)
+                pass
+
+        # print("iter_result_product:", len(res))
+        # for i in res:
+        #     print(i)
+
+        self.iter_result_save = res, adj_land_list
+        return res, adj_land_list
 
     def analyse_condition(self, return_instantly=False):
         global_condition_added = False
@@ -2397,22 +2540,49 @@ class Bot(QRunnable):
             iter_result_list, adj_land_list = self.iter_mine_position()
 
             if len(iter_result_list) > 0:
-                iter_result_union = set()
-                for i in iter_result_list:
-                    iter_result_union |= set(i)
-                if len(iter_result_union) < len(adj_land_list):
-                    for land in set(adj_land_list) - iter_result_union:
-                        confirm_result_dict[land] = False
-                    self.iter_result_save = None
+                cover_mine_count = self.game.mine_field.cover_mine_count()
+                if min([len(x) for x in iter_result_list]) == max([len(x) for x in iter_result_list]):
+                    iter_result_union = set()
+                    for i in iter_result_list:
+                        iter_result_union |= set(i)
+                    if len(iter_result_union) < len(adj_land_list):
+                        for land in set(adj_land_list) - iter_result_union:
+                            confirm_result_dict[land] = False
+                        self.iter_result_save = None
+                    if cover_mine_count - len(iter_result_list[0]) == self.game.mine_field.cover_land_count() - len(adj_land_list):
+                        for land in self.game.mine_field.land_list:
+                            if not land.checked and land.cover != SYMBOL_FLAG and land.id not in adj_land_list:
+                                confirm_result_dict[land.id] = True
+                        self.iter_result_save = None
+                elif len(adj_land_list) == self.game.mine_field.cover_land_count() \
+                        and any([len(x) == cover_mine_count for x in iter_result_list]):
+                    iter_result_list_matched = [x for x in iter_result_list if len(x) == cover_mine_count]
+                    if len(iter_result_list_matched) == 1:
+                        for land in adj_land_list:
+                            if land in iter_result_list[0]:
+                                confirm_result_dict[land] = False
+                            else:
+                                confirm_result_dict[land] = True
+                        self.iter_result_save = None
+                    else:
+                        iter_result_union = set()
+                        for i in iter_result_list_matched:
+                            iter_result_union |= set(i)
+                        if len(iter_result_union) < len(adj_land_list):
+                            for land in set(adj_land_list) - iter_result_union:
+                                confirm_result_dict[land] = False
+                            self.iter_result_save = None
 
         return confirm_result_dict
 
     def analyse_possibility(self) -> (list, list, dict, ):
         mine_field = self.game.mine_field
-        cover_land_count = mine_field.field_width * mine_field.field_height \
-            - mine_field.revealed_land_count() - mine_field.marked_land_count()
-        cover_mine_count = mine_field.mine_count - mine_field.marked_land_count()
-        avg_mine_rate = cover_mine_count / cover_land_count
+        cover_land_count = self.game.mine_field.cover_land_count()
+        cover_mine_count = self.game.mine_field.cover_mine_count()
+        if cover_land_count == 0:
+            avg_mine_rate = 1.0
+        else:
+            avg_mine_rate = cover_mine_count / cover_land_count
         max_mine_rate, min_mine_rate = avg_mine_rate, avg_mine_rate
 
         all_adj_land_dict, none_adj_land_dict = dict(), dict()
@@ -2439,7 +2609,7 @@ class Bot(QRunnable):
             if min([len(x) for x in iter_result_list]) == max([len(x) for x in iter_result_list]):
                 none_adj_mine_rate = (cover_mine_count - len(iter_result_list[0])) / (cover_land_count - len(adj_land_list))
                 adj_mine_rate = len(iter_result_list[0]) / len(adj_land_list)
-                print(none_adj_mine_rate, adj_mine_rate)
+                # print(none_adj_mine_rate, adj_mine_rate)
 
         for land in mine_field.land_list:
             if not land.checked and land.cover == SYMBOL_BLANK:
@@ -2568,7 +2738,7 @@ class Bot(QRunnable):
 
         # print("choice_list", len(choice_list))
 
-        if choice_list[0] in possibility_dict and possibility_dict[choice_list[0]] > 0.3:  # >= 1/3
+        if len(choice_list) > 0 and choice_list[0] in possibility_dict and possibility_dict[choice_list[0]] > 0.3:  # >= 1/3
             mark_count = dict()
             min_mark_count = mine_field.mine_count
             for land_id in choice_list:
@@ -2655,17 +2825,19 @@ class BotLooper(QRunnable):
     @Slot()
     def run(self):
         while self.looping != 0:
-            # print("[Looper] Start Bot", self.looping)
+            # print("[Looper] Start Bot", self.looping, datetime.datetime.now())
             self.bot_running = True
             self.status.start_bot.emit()
             while self.bot_running:
+                time.sleep(0.001)
                 if self.looping == 0:
                     break
             if self.looping == 0:
                 break
+            # print("[Looper] Bot Complete", self.looping, datetime.datetime.now())
 
-            for _ in range(1 * 10):
-                time.sleep(0.1)
+            for _ in range(1000):
+                time.sleep(0.001)
                 if self.looping == 0:
                     break
 
@@ -2675,17 +2847,19 @@ class BotLooper(QRunnable):
             if self.looping == 0:
                 break
 
-            # print("[Looper] Init Map", self.looping)
+            # print("[Looper] Init Map", self.looping, datetime.datetime.now())
             self.map_initializing = True
             self.status.init_map.emit()
             while self.map_initializing:
+                time.sleep(0.001)
                 if self.looping == 0:
                     break
             if self.looping == 0:
                 break
+            # print("[Looper] Map Init Complete", self.looping, datetime.datetime.now())
 
-            for _ in range(1 * 10):
-                time.sleep(0.1)
+            for _ in range(1000):
+                time.sleep(0.001)
                 if self.looping == 0:
                     break
 
