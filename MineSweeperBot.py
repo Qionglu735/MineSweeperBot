@@ -335,19 +335,10 @@ class MineField(object):
         self.mine_count = min(max(1, self.mine_count), (self.field_width - 1) * (self.field_height - 1))
 
         if self.land_list_copy is not None:
-            if self.ui is not None:
-                for land in self.land_list_copy:
-                    if land.ui is not None:
-                        self.ui.remove_land(land.ui)
             self.land_list_copy.clear()
         if self.land_list is not None:
             if keep_ui:
                 self.land_list_copy = self.land_list[:]
-            else:
-                if self.ui is not None:
-                    for land in self.land_list:
-                        if land.ui is not None:
-                            self.ui.remove_land(land.ui)
             self.land_list.clear()
         self.land_list = list()
         for y in range(self.field_height):
@@ -913,21 +904,19 @@ class MineFieldUI(QWidget):
         else:
             grid = self.layout()
             while grid.count() > 0:
-                grid.itemAt(0).widget().setParent(None)
+                land_ui = grid.itemAt(0).widget()
+                land = land_ui.land
+                land.ui = None
+                land_ui.clicked.disconnect(self.left_click)
+                land_ui.customContextMenuRequested.disconnect(self.right_click)
+                land_ui.deleteLater()
+                land_ui.setParent(None)
 
     def add_land(self, land_ui, y, x):
         land_ui.clicked.connect(self.left_click)
         land_ui.customContextMenuRequested.connect(self.right_click)
         grid = self.layout()
         grid.addWidget(land_ui, y, x)
-
-    def remove_land(self, land_ui):
-        grid = self.layout()
-        grid.removeWidget(land_ui)
-        land_ui.clicked.disconnect(self.left_click)
-        land_ui.customContextMenuRequested.disconnect(self.right_click)
-        land_ui.deleteLater()
-        land_ui.setParent(None)
 
     def left_click(self):
         self.sender().left_click()
@@ -2027,13 +2016,21 @@ def main():
                 game_exit_list[r["game_id"]] = True
                 continue
         except KeyboardInterrupt:
-            continue
+            break
 
         if ui == "off":
             process_global_stat(global_stat, start_time, r)
 
-    for game in game_list:
-        game.join()
+    try:
+        for game in game_list:
+            game.join()
+    except KeyboardInterrupt:
+        try:
+            for game in game_list:
+                game.terminate()
+                game.join()
+        except KeyboardInterrupt:
+            pass
 
 
 def create_new_game(index, global_stat, ui):
@@ -2082,9 +2079,10 @@ def process_global_stat(global_stat, start_time, r):
     avg_time = 0
     if win > 0:
         avg_time = total_time / win
+
+    pass_time = (datetime.datetime.now() - start_time).seconds
     log_line = ", ".join([
-        f"Game/s: {sum([len(x) for x in global_stat.values()])
-                          / (datetime.datetime.now() - start_time).seconds:.2f}",
+        f"Game/s: {sum([len(x) for x in global_stat.values()]) / (pass_time if pass_time > 0 else 1):.2f}",
         f"[stat {preset_id}] Game: {r["game_id"]:2d}",
         f"No.{no}: {" WIN" if r["win"] else "LOSE"}",
         f"Minefield: {PRESET[preset_id][0]:2d}x{PRESET[preset_id][1]:2d}/{PRESET[preset_id][2]:2d}",
