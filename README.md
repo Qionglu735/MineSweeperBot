@@ -24,6 +24,6 @@ With a MineSweeper bot
 
 Bot win rate
 
-1. Easy,      9 x  9 with 10 mines: 95.90%, guess accuracy: 75.01%, avg time: 0.40s (225k tests)
-2. Moderate, 16 x 16 with 40 mines: 84.04%, guess accuracy: 69.51%, avg time: 1.62s (169k tests)
-3. Hard,     36 x 16 with 99 mines: 37.60%, guess accuracy: 73.97%, avg time: 4.51s (113k tests)
+1. Easy,      9 x  9 with 10 mines: 96.12%, guess accuracy: 79.09%, avg time: 0.43s (179k tests)
+2. Moderate, 16 x 16 with 40 mines: 84.33%, guess accuracy: 76.49%, avg time: 0.52s (173k tests)
+3. Hard,     36 x 16 with 99 mines: 39.13%, guess accuracy: 79.22%, avg time: 2.35s (151k tests)
